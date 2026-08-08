@@ -35,6 +35,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.sg = sg
         self.login = getpass.getuser()
+        self.email = config.current_user_email(self.login)
         self.project = None
         self.pool = QThreadPool.globalInstance()
 
@@ -67,7 +68,7 @@ class MainWindow(QMainWindow):
         h.addWidget(self.title)
         h.addStretch()
 
-        self.user_lbl = QLabel(self.login)
+        self.user_lbl = QLabel(self.email)
         h.addWidget(self.user_lbl)
         root.addWidget(header)
 
@@ -97,16 +98,24 @@ class MainWindow(QMainWindow):
     # -- data --------------------------------------------------------------
 
     def _bootstrap(self):
-        owner = self.sg.resolve_owner(self.login)
+        owner = self.sg.resolve_owner(self.email)
         projects = self.sg.active_projects()
         return owner, projects
 
     def _on_bootstrap(self, result):
         owner, projects = result
-        if not owner:
+        if not owner and config.TASK_OWNER_IS_ENTITY:
             self.statusBar().showMessage(
-                f"No {config.TASK_OWNER_ENTITY} found for login '{self.login}' "
+                f"No {config.TASK_OWNER_ENTITY} found with "
+                f"{config.TASK_OWNER_MATCH_FIELD} '{self.email}' "
                 f"— My Tasks will be empty")
+        elif not owner:
+            # String mode still works without the entity: it falls back to the
+            # email address, which is probably what the tasks store anyway.
+            self.statusBar().showMessage(
+                f"Connected — {len(projects)} projects "
+                f"(no {config.TASK_OWNER_ENTITY} for '{self.email}'; "
+                f"matching tasks on the address itself)")
         else:
             self.statusBar().showMessage(f"Connected — {len(projects)} projects")
         self.project_page.set_projects(projects)
@@ -142,7 +151,7 @@ class MainWindow(QMainWindow):
 
     def launch_software(self, software):
         try:
-            pid = launcher.launch(self.project, software, self.login)
+            pid = launcher.launch(self.project, software, self.login, self.email)
             self.statusBar().showMessage(
                 f"Launched {software['code']} (pid {pid}) with "
                 f"{self.project['name']} environment")
