@@ -1,0 +1,19 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Virtualenvs — including the one that lives inside the source tree
+venv/
+.venv/
+shotdeck_venv/
+sgdesk/
+
+.idea/
+.vscode/
+
+# Never commit credentials
+*.env
+.env
+
+# Internal working notes, not for the repo
+HANDOFF.md
