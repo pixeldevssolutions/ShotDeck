@@ -15,8 +15,7 @@ class SGClient:
         if not config.SG_SCRIPT_KEY:
             raise RuntimeError(
                 "SG_SCRIPT_KEY is not set. Export it before starting ShotDeck "
-                "(see DEPLOY-ROCKY9.md, step 5) — it is deliberately not "
-                "stored in the source.")
+                )
         self.sg = shotgun_api3.Shotgun(
             config.SG_SITE,
             script_name=config.SG_SCRIPT_NAME,
