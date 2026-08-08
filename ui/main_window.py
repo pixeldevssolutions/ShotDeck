@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
 )
 
 import applog, config, launcher, paths
-from .widgets import STYLE
+from .widgets import STYLE, Avatar
 from .console import ConsolePanel
 from .project_page import ProjectPage
 from .software_page import SoftwarePage
@@ -45,7 +45,8 @@ class MainWindow(QMainWindow):
         self.pool = QThreadPool.globalInstance()
 
         self.setWindowTitle(config.APP_TITLE)
-        self.resize(880, 640)
+        self.resize(1080, 720)
+        self.setMinimumSize(760, 480)
         self.setStyleSheet(STYLE)
 
         central = QWidget()
@@ -57,20 +58,33 @@ class MainWindow(QMainWindow):
         # header
         header = QWidget()
         header.setObjectName("header")
-        header.setFixedHeight(48)
+        header.setFixedHeight(54)
         h = QHBoxLayout(header)
-        h.setContentsMargins(12, 0, 16, 0)
+        h.setContentsMargins(16, 0, 16, 0)
+        h.setSpacing(4)
 
-        self.back_btn = QPushButton("\u2039 Projects")
+        self.back_btn = QPushButton("\u2039  Projects")
         self.back_btn.setObjectName("backBtn")
         self.back_btn.setCursor(Qt.PointingHandCursor)
         self.back_btn.clicked.connect(self.show_projects)
         self.back_btn.hide()
         h.addWidget(self.back_btn)
 
+        # Breadcrumb: app name, then the project once one is open.
         self.title = QLabel(config.APP_TITLE)
         self.title.setObjectName("headerTitle")
         h.addWidget(self.title)
+
+        self.crumb = QLabel("\u203a")
+        self.crumb.setObjectName("crumb")
+        self.crumb.hide()
+        h.addWidget(self.crumb)
+
+        self.crumb_project = QLabel("")
+        self.crumb_project.setObjectName("headerTitle")
+        self.crumb_project.hide()
+        h.addWidget(self.crumb_project)
+
         h.addStretch()
 
         self.term_btn = QPushButton("Terminal")
@@ -82,8 +96,16 @@ class MainWindow(QMainWindow):
         self.term_btn.toggled.connect(self.toggle_console)
         h.addWidget(self.term_btn)
 
-        self.user_lbl = QLabel(self.email)
-        h.addWidget(self.user_lbl)
+        chip = QWidget()
+        chip.setObjectName("userChip")
+        chip_lay = QHBoxLayout(chip)
+        chip_lay.setContentsMargins(4, 0, 10, 0)
+        chip_lay.setSpacing(8)
+        chip_lay.addWidget(Avatar(self.email))
+        self.user_lbl = QLabel(self.email.split("@")[0])
+        self.user_lbl.setToolTip(self.email)
+        chip_lay.addWidget(self.user_lbl)
+        h.addWidget(chip)
         root.addWidget(header)
 
         # pages, with the terminal as a collapsible bottom pane
@@ -100,9 +122,10 @@ class MainWindow(QMainWindow):
         self.split = QSplitter(Qt.Vertical)
         self.split.addWidget(self.stack)
         self.split.addWidget(self.console)
-        self.split.setStretchFactor(0, 3)
-        self.split.setStretchFactor(1, 1)
-        self.split.setChildrenCollapsible(False)
+        self.split.setStretchFactor(0, 1)
+        self.split.setStretchFactor(1, 0)
+        self.split.setCollapsible(0, False)
+        self.split.setHandleWidth(1)
         root.addWidget(self.split)
 
         QShortcut(QKeySequence("Ctrl+`"), self,
@@ -121,9 +144,13 @@ class MainWindow(QMainWindow):
 
     def toggle_console(self, shown):
         self.console.setVisible(shown)
-        if shown and self.split.sizes()[1] < 80:
-            total = sum(self.split.sizes()) or self.height()
-            self.split.setSizes([int(total * 0.65), int(total * 0.35)])
+        # Hiding alone is not enough: the splitter keeps the pane's share and
+        # leaves a dead strip at the bottom, so the sizes are set by hand.
+        total = sum(self.split.sizes()) or self.split.height() or self.height()
+        if shown:
+            self.split.setSizes([int(total * 0.62), int(total * 0.38)])
+        else:
+            self.split.setSizes([total, 0])
 
     def show_console(self):
         if not self.term_btn.isChecked():
@@ -168,7 +195,8 @@ class MainWindow(QMainWindow):
     def show_projects(self):
         self.project = None
         self.back_btn.hide()
-        self.title.setText(config.APP_TITLE)
+        self.crumb.hide()
+        self.crumb_project.hide()
         self.stack.setCurrentWidget(self.project_page)
 
     def open_project(self, project):
@@ -176,7 +204,9 @@ class MainWindow(QMainWindow):
         self.task = None
         self.software_page.set_task(None)
         self.software_page.set_project(project)
-        self.title.setText(project["name"])
+        self.crumb_project.setText(project["name"])
+        self.crumb.show()
+        self.crumb_project.show()
         self.back_btn.show()
         self.stack.setCurrentWidget(self.software_page)
         self.software_page.set_software([])
