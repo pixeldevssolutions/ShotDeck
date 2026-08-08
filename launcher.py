@@ -5,6 +5,7 @@ import sys
 
 import config
 import context as ctx_mod
+import rez_scan
 from env_resolver import build_env
 
 
@@ -37,6 +38,25 @@ def launch(project, software, login=None, email=None, task=None):
         stderr=subprocess.DEVNULL,
     )
     return proc.pid
+
+
+def launch_package(project, package, version=None, task=None,
+                   login=None, email=None, extra_packages=()):
+    """Launch a DCC discovered in the rez package tree, against a task.
+
+    Runs `rez env <package>-<version> shotdeck_context -- <command>` in one
+    shot: the command is passed to rez, so nothing has to be typed once the
+    environment resolves.
+    """
+    software = {
+        "code": package,
+        "version": version or "",
+        config.SOFTWARE_REZ_FIELD: " ".join(
+            [rez_scan.request(package, version)] + list(extra_packages)),
+        "linux_path": rez_scan.command_for(package),
+        "linux_args": "",
+    }
+    return launch(project, software, login=login, email=email, task=task)
 
 
 def _build_command(software):
