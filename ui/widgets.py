@@ -83,6 +83,17 @@ QMainWindow, QWidget { background: #2b2b2b; color: #d5d5d5;
     font-family: 'Open Sans', 'Segoe UI', sans-serif; font-size: 12px; }
 #header { background: #1f1f1f; }
 #contextBar { background: #1f1f1f; color: #8f8f8f; border-top: 1px solid #3a3a3a; }
+#termBtn { background: transparent; border: 1px solid #3a3a3a; border-radius: 3px;
+    color: #8f8f8f; padding: 3px 10px; margin-right: 10px; }
+#termBtn:checked { color: #18a7e0; border-color: #18a7e0; }
+#console { background: #161616; }
+#consoleBar { background: #1f1f1f; border-top: 1px solid #3a3a3a; }
+#consoleTitle { color: #d5d5d5; font-weight: 600; }
+#consoleSource { color: #6f6f6f; padding-left: 8px; }
+#consoleBtn { background: transparent; border: none; color: #8f8f8f; padding: 2px 8px; }
+#consoleBtn:hover { color: #18a7e0; }
+#consoleView { background: #161616; color: #d5d5d5; border: none;
+    selection-background-color: #18a7e0; }
 #headerTitle { font-size: 15px; font-weight: 600; color: #ffffff; }
 #backBtn { background: transparent; border: none; color: #18a7e0;
     font-size: 13px; padding: 4px 10px; }

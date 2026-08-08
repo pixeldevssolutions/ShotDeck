@@ -3,9 +3,11 @@ from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QScrollArea, QGridLayout, QTabWidget,
     QTableWidget, QTableWidgetItem, QHeaderView, QLineEdit, QLabel, QMenu,
+    QApplication,
 )
 
 import config
+import paths
 import rez_scan
 from .widgets import Tile
 
@@ -51,12 +53,14 @@ class TasksTable(QWidget):
 
     task_selected = Signal(object)          # the Task dict, or None
     package_launched = Signal(object, str, str)   # task, package, version
+    folder_requested = Signal(str)                # absolute path to open
 
     def __init__(self):
         super().__init__()
         self._tasks = []
         self._rows = []              # row index -> task dict, after filtering
         self._packages = []          # [(package, [versions]), ...] from disk
+        self._project = None         # needed to build folder paths
         lay = QVBoxLayout(self)
         lay.setContentsMargins(16, 12, 16, 12)
 
@@ -90,8 +94,11 @@ class TasksTable(QWidget):
         r = rows[0].row()
         self.task_selected.emit(self._rows[r] if r < len(self._rows) else None)
 
+    def set_project(self, project):
+        self._project = project
+
     def _on_context_menu(self, pos):
-        """Right-click a task: pick a DCC and version to open it with."""
+        """Right-click a task: open its folder, or launch a DCC on it."""
         index = self.table.indexAt(pos)
         if not index.isValid() or index.row() >= len(self._rows):
             return
@@ -107,6 +114,9 @@ class TasksTable(QWidget):
         header = menu.addAction(
             "Open {0} with…".format(entity or task.get("content", "task")))
         header.setEnabled(False)
+        menu.addSeparator()
+
+        self._add_folder_actions(menu, task)
         menu.addSeparator()
 
         if not self._packages:
@@ -136,6 +146,37 @@ class TasksTable(QWidget):
 
         menu.exec(self.table.viewport().mapToGlobal(pos))
 
+    def _add_folder_actions(self, menu, task):
+        entries = paths.folders(self._project, task) if self._project else []
+        if not entries:
+            act = menu.addAction("No folder path for this task")
+            act.setEnabled(False)
+            act.setToolTip(
+                "Needs a linked Shot with a sequence, or an Asset with a type")
+            return
+
+        root_label, root_path, root_exists = entries[0]
+        root_act = QAction(root_label, menu)
+        root_act.setToolTip(root_path)
+        root_act.setEnabled(root_exists)
+        root_act.triggered.connect(
+            lambda _=False, p=root_path: self.folder_requested.emit(p))
+        menu.addAction(root_act)
+
+        sub = menu.addMenu("Open folder")
+        for label, path, exists in entries[1:]:
+            act = QAction(label, sub)
+            act.setToolTip(path)
+            act.setEnabled(exists)      # greyed out means it was never created
+            act.triggered.connect(
+                lambda _=False, p=path: self.folder_requested.emit(p))
+            sub.addAction(act)
+        sub.addSeparator()
+        copy = QAction("Copy path", sub)
+        copy.triggered.connect(
+            lambda _=False, p=root_path: QApplication.clipboard().setText(p))
+        sub.addAction(copy)
+
     def _rebuild(self):
         text = self.search.text().lower()
         self.table.setRowCount(0)
@@ -162,6 +203,7 @@ class SoftwarePage(QWidget):
     software_launched = Signal(dict)
     task_selected = Signal(object)
     package_launched = Signal(object, str, str)
+    folder_requested = Signal(str)
 
     def __init__(self):
         super().__init__()
@@ -187,6 +229,10 @@ class SoftwarePage(QWidget):
         self.tasks.task_selected.connect(self.set_task)
         self.tasks.task_selected.connect(self.task_selected)
         self.tasks.package_launched.connect(self.package_launched)
+        self.tasks.folder_requested.connect(self.folder_requested)
+
+    def set_project(self, project):
+        self.tasks.set_project(project)
 
     def set_software(self, softwares):
         self.apps.set_software(softwares)

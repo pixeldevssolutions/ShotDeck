@@ -41,7 +41,38 @@ def current_user_email(login):
 TASK_FIELDS = [
     "content", "sg_status_list", "due_date",
     "entity", "step", "project", TASK_OWNER_FIELD,
+    # Deep fields, needed to build the folder path without a second query.
+    "entity.Shot.sg_sequence",
+    "entity.Asset.sg_asset_type",
 ]
+
+# Where a task's files live. Tokens: {project} (tank_name), {project_name},
+# {sequence}, {shot}, {asset}, {asset_type}, {entity}, {step}.
+ENTITY_PATH_TEMPLATES = {
+    "Shot": "/jobs/{project}/sequences/{sequence}/shots/{shot}",
+    "Asset": "/jobs/{project}/assets/{asset_type}/{asset}",
+}
+
+# Shortcuts listed under "Open folder". {step} is the pipeline step lowercased.
+# Missing ones are greyed out rather than hidden, so it's obvious when a shot
+# was never built out properly.
+ENTITY_SUBFOLDERS = [
+    ("maya scenes",     "maya/scenes"),
+    ("maya scenes / {step}", "maya/scenes/{step}"),
+    ("houdini hip",     "houdini/hip"),
+    ("nuke comp",       "nuke/comp/scene"),
+    ("nuke / {step}",   "nuke/{step}/scene"),
+    ("blender scenes",  "blender/scenes"),
+    ("3DE scene",       "3DE/scene"),
+    ("plates",          "elements/plates"),
+    ("elements",        "elements"),
+    ("dailies",         "elements/dailies"),
+    ("renders",         "nuke/renders"),
+]
+
+# Rocky 9 desktop: xdg-open picks the session's file manager. Override with
+# SHOTDECK_FILE_MANAGER=nautilus (or dolphin, thunar, nemo) if that misfires.
+FILE_MANAGER = os.environ.get("SHOTDECK_FILE_MANAGER", "xdg-open")
 
 SOFTWARE_FIELDS = [
     "code", "sg_status_list", "image",
@@ -57,6 +88,10 @@ SOFTWARE_REZ_FIELD = "sg_rez_packages"
 # Package appended to every rez request so in-DCC tools can `import
 # shotdeck_context`. Set to "" to stop injecting it.
 REZ_CONTEXT_PACKAGE = "shotdeck_context"
+
+# rez entry point. Set SHOTDECK_REZ_EXECUTABLE to an absolute path when the
+# artist's login shell does not put rez on PATH.
+REZ_EXECUTABLE = os.environ.get("SHOTDECK_REZ_EXECUTABLE", "rez")
 
 # Released DCC packages, one folder per package and per version inside it.
 # The right-click menu on a task is built from this tree.

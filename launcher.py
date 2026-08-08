@@ -1,12 +1,20 @@
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 
+import applog
 import config
 import context as ctx_mod
 import rez_scan
 from env_resolver import build_env
+
+log = applog.get()
+
+
+class LaunchError(RuntimeError):
+    """Raised when a launch cannot even be attempted."""
 
 
 def launch(project, software, login=None, email=None, task=None):
@@ -15,6 +23,10 @@ def launch(project, software, login=None, email=None, task=None):
     `task` is the ShotGrid Task the artist selected, or None. Either way a
     context file is written and pointed at by SHOTDECK_CONTEXT_FILE, so
     in-DCC publish tools always have something to read.
+
+    Returns (pid, log_path). The process writes its stdout and stderr to
+    log_path -- a file rather than a pipe, so a DCC is never blocked by a full
+    pipe buffer after ShotDeck exits.
     """
     ctx = ctx_mod.build(project, software, task, login, email)
     ctx_path = ctx_mod.write(ctx)
@@ -26,18 +38,41 @@ def launch(project, software, login=None, email=None, task=None):
     extra.update(ctx_mod.env(ctx, ctx_path))
     env = build_env(project, software, extra=extra)
 
-    if software.get("sg_external_ui"):
-        return _launch_external_ui(software, env)
+    name = software.get("code") or "app"
+    task_desc = f"task {task['id']} ({task.get('content', '')})" if task \
+        else "no task"
+    log.info("launching %s for %s / %s", name, project["name"], task_desc)
+    log.debug("context file: %s", ctx_path)
 
-    cmd = _build_command(software)
-    proc = subprocess.Popen(
-        cmd,
-        env=env,
-        start_new_session=True,   # survive ShotDeck exiting
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    return proc.pid
+    if software.get("sg_external_ui"):
+        cmd = _external_ui_command(software)
+    else:
+        cmd = _build_command(software)
+
+    _preflight(cmd, software)
+
+    log_path = applog.launch_log_path(name)
+    log.info("command: %s", _quote(cmd))
+    log.info("output:  %s", log_path)
+
+    with open(log_path, "wb") as out:
+        out.write(_log_header(cmd, env, ctx, log_path).encode())
+        out.flush()
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                env=env,
+                start_new_session=True,   # survive ShotDeck exiting
+                stdout=out,
+                stderr=subprocess.STDOUT,
+            )
+        except OSError as e:
+            log.error("could not start %s: %s", cmd[0], e)
+            raise LaunchError(
+                f"Could not start {cmd[0]}: {e}\n\nCommand:\n{_quote(cmd)}")
+
+    log.info("started %s with pid %s", name, proc.pid)
+    return proc.pid, log_path
 
 
 def launch_package(project, package, version=None, task=None,
@@ -73,7 +108,7 @@ def _build_command(software):
 
     if not exe:
         if not rez_pkgs:
-            raise RuntimeError(
+            raise LaunchError(
                 f"Software '{software['code']}' has neither linux_path nor "
                 f"{config.SOFTWARE_REZ_FIELD} set — nothing to launch")
         # No explicit command: rely on the package's own alias, named after
@@ -81,7 +116,7 @@ def _build_command(software):
         exe = software["code"].lower().replace(" ", "_")
 
     if rez_pkgs:
-        return ["rez", "env"] + rez_pkgs + ["--", exe] + args
+        return [config.REZ_EXECUTABLE, "env"] + rez_pkgs + ["--", exe] + args
     return [exe] + args
 
 
@@ -96,18 +131,63 @@ def _rez_packages(software):
     return pkgs
 
 
-def _launch_external_ui(software, env):
+def _preflight(cmd, software):
+    """Fail with something readable instead of a silent non-start."""
+    exe = cmd[0]
+    if os.path.sep in exe:
+        if not os.path.isfile(exe):
+            raise LaunchError(
+                f"linux_path does not exist on this machine:\n{exe}")
+        if not os.access(exe, os.X_OK):
+            raise LaunchError(f"linux_path is not executable:\n{exe}")
+        return
+
+    if shutil.which(exe) is None:
+        if exe == config.REZ_EXECUTABLE:
+            raise LaunchError(
+                "rez is not on PATH for this session, so packaged apps cannot "
+                "be launched.\n\nCheck that the artist's login shell sources "
+                "the studio rez setup, or set SHOTDECK_REZ_EXECUTABLE to an "
+                "absolute path.")
+        raise LaunchError(f"Command not found on PATH: {exe}")
+
+
+def _log_header(cmd, env, ctx, log_path):
+    """Written at the top of every launch log, so it explains itself."""
+    task = ctx.get("task") or {}
+    shotdeck_env = "\n".join(
+        f"  {k}={v}" for k, v in sorted(env.items())
+        if k.startswith(("SHOTDECK_", "SGDESK_", "REZ_")))
+    return (
+        "# ShotDeck launch log\n"
+        f"# {log_path}\n"
+        f"# project : {ctx['project']['name']} (id {ctx['project']['id']})\n"
+        f"# task    : {task.get('name') or '(none)'}"
+        f"{' on ' + task['entity_name'] if task.get('entity_name') else ''}\n"
+        f"# user    : {ctx['user']['login']} <{ctx['user']['email']}>\n"
+        f"# command : {_quote(cmd)}\n"
+        "#\n# environment passed in:\n"
+        f"{shotdeck_env}\n"
+        "# ---------------- process output below ----------------\n\n"
+    )
+
+
+def _quote(cmd):
+    """The command as you would paste it into a shell."""
+    try:
+        return shlex.join(cmd)          # Python 3.8+
+    except AttributeError:              # pragma: no cover - old interpreters
+        return " ".join(shlex.quote(c) for c in cmd)
+
+
+def _external_ui_command(software):
     """DCC has no Python API — start the companion app instead.
     The companion inherits the full project env and launches the exe itself."""
     name = software["code"].lower().replace(" ", "_")
     ext = software.get("sg_file_ext") or "prj"
-    cmd = [
+    return [
         sys.executable, "-m", "sgdesk_dcc.external.app",
         "--name", name, "--ext", ext,
         "--exe", software["linux_path"],
         "--args", software.get("linux_args") or "",
     ]
-    proc = subprocess.Popen(
-        cmd, env=env, start_new_session=True,
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    return proc.pid

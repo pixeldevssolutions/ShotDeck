@@ -1,15 +1,19 @@
 import getpass
 
 from PySide6.QtCore import Qt, QThreadPool, QRunnable, QObject, Signal
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QStackedWidget, QMessageBox,
+    QPushButton, QStackedWidget, QMessageBox, QSplitter,
 )
 
-import config, launcher
+import applog, config, launcher, paths
 from .widgets import STYLE
+from .console import ConsolePanel
 from .project_page import ProjectPage
 from .software_page import SoftwarePage
+
+log = applog.get()
 
 
 class _WorkerSignals(QObject):
@@ -69,25 +73,61 @@ class MainWindow(QMainWindow):
         h.addWidget(self.title)
         h.addStretch()
 
+        self.term_btn = QPushButton("Terminal")
+        self.term_btn.setObjectName("termBtn")
+        self.term_btn.setCheckable(True)
+        self.term_btn.setCursor(Qt.PointingHandCursor)
+        self.term_btn.setToolTip(
+            "Show what ShotDeck is running in the background (Ctrl+`)")
+        self.term_btn.toggled.connect(self.toggle_console)
+        h.addWidget(self.term_btn)
+
         self.user_lbl = QLabel(self.email)
         h.addWidget(self.user_lbl)
         root.addWidget(header)
 
-        # pages
+        # pages, with the terminal as a collapsible bottom pane
         self.stack = QStackedWidget()
         self.project_page = ProjectPage()
         self.software_page = SoftwarePage()
         self.stack.addWidget(self.project_page)
         self.stack.addWidget(self.software_page)
-        root.addWidget(self.stack)
+
+        self.console = ConsolePanel()
+        self.console.closed.connect(lambda: self.term_btn.setChecked(False))
+        self.console.hide()
+
+        self.split = QSplitter(Qt.Vertical)
+        self.split.addWidget(self.stack)
+        self.split.addWidget(self.console)
+        self.split.setStretchFactor(0, 3)
+        self.split.setStretchFactor(1, 1)
+        self.split.setChildrenCollapsible(False)
+        root.addWidget(self.split)
+
+        QShortcut(QKeySequence("Ctrl+`"), self,
+                  activated=self.term_btn.toggle)
 
         self.project_page.project_selected.connect(self.open_project)
         self.software_page.software_launched.connect(self.launch_software)
         self.software_page.task_selected.connect(self._on_task_selected)
         self.software_page.package_launched.connect(self.launch_package)
+        self.software_page.folder_requested.connect(self.open_folder)
 
         self.statusBar().showMessage("Connecting to ShotGrid...")
         self._run(self._bootstrap, self._on_bootstrap)
+
+    # -- terminal ----------------------------------------------------------
+
+    def toggle_console(self, shown):
+        self.console.setVisible(shown)
+        if shown and self.split.sizes()[1] < 80:
+            total = sum(self.split.sizes()) or self.height()
+            self.split.setSizes([int(total * 0.65), int(total * 0.35)])
+
+    def show_console(self):
+        if not self.term_btn.isChecked():
+            self.term_btn.setChecked(True)
 
     # -- async helper ------------------------------------------------------
 
@@ -135,6 +175,7 @@ class MainWindow(QMainWindow):
         self.project = project
         self.task = None
         self.software_page.set_task(None)
+        self.software_page.set_project(project)
         self.title.setText(project["name"])
         self.back_btn.show()
         self.stack.setCurrentWidget(self.software_page)
@@ -162,22 +203,42 @@ class MainWindow(QMainWindow):
         self.task = task
         self.software_page.set_task(task)
         try:
-            pid = launcher.launch_package(
+            pid, log_path = launcher.launch_package(
                 self.project, package, version, task, self.login, self.email)
-            self.statusBar().showMessage(
-                f"Launched {package}-{version} (pid {pid}) "
-                f"on task '{task.get('content', '')}'")
         except Exception as e:
-            QMessageBox.critical(self, "Launch failed", str(e))
+            self._launch_failed(f"{package}-{version}", e)
+            return
+        self.console.tail(log_path)
+        self.statusBar().showMessage(
+            f"Launched {package}-{version} (pid {pid}) "
+            f"on task '{task.get('content', '')}' — see Terminal for output")
 
     def launch_software(self, software):
         try:
-            pid = launcher.launch(
+            pid, log_path = launcher.launch(
                 self.project, software, self.login, self.email, self.task)
-            where = (f"on task '{self.task['content']}'" if self.task
-                     else "with no task context")
-            self.statusBar().showMessage(
-                f"Launched {software['code']} (pid {pid}) "
-                f"in {self.project['name']} {where}")
         except Exception as e:
-            QMessageBox.critical(self, "Launch failed", str(e))
+            self._launch_failed(software.get("code", "app"), e)
+            return
+        self.console.tail(log_path)
+        where = (f"on task '{self.task['content']}'" if self.task
+                 else "with no task context")
+        self.statusBar().showMessage(
+            f"Launched {software['code']} (pid {pid}) "
+            f"in {self.project['name']} {where} — see Terminal for output")
+
+    def open_folder(self, path):
+        try:
+            paths.open_folder(path)
+            self.statusBar().showMessage(f"Opened {path}")
+        except Exception as e:
+            log.error("could not open %s: %s", path, e)
+            QMessageBox.warning(self, "Open folder", str(e))
+
+    def _launch_failed(self, what, error):
+        """Open the Terminal on failure: the log says more than the dialog."""
+        log.error("launch of %s failed: %s", what, error)
+        self.show_console()
+        QMessageBox.critical(
+            self, "Launch failed",
+            f"{error}\n\nThe Terminal panel shows the command that was tried.")
