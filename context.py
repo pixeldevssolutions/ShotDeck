@@ -41,7 +41,10 @@ def build(project, software, task=None, login=None, email=None):
         "project": {
             "id": project["id"],
             "name": project["name"],
-            "code": project.get("tank_name") or "",
+            # Same fallback env_resolver uses, so the code matches the folder
+            # name when a project has no tank_name set.
+            "code": (project.get("tank_name")
+                     or project["name"].replace(" ", "_").lower()),
         },
         "software": {
             "code": software.get("code") if software else "",

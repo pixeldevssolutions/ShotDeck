@@ -121,13 +121,28 @@ def _build_command(software):
 
 
 def _rez_packages(software):
-    """Requested rez packages, with the context package always included."""
+    """Requested packages, plus the context package when it is released.
+
+    Asking for a package that doesn't exist makes rez reject the whole
+    resolve, so an unbuilt shotdeck_context would block every launch. The
+    SHOTDECK_* variables carry the context regardless, so skipping it costs
+    only the convenience of `import shotdeck_context`.
+    """
     pkgs = (software.get(config.SOFTWARE_REZ_FIELD) or "").split()
     if not pkgs:
         return []
-    if config.REZ_CONTEXT_PACKAGE and not any(
-            p.split("-")[0] == config.REZ_CONTEXT_PACKAGE for p in pkgs):
-        pkgs.append(config.REZ_CONTEXT_PACKAGE)
+
+    ctx_pkg = config.REZ_CONTEXT_PACKAGE
+    if not ctx_pkg or any(p.split("-")[0] == ctx_pkg for p in pkgs):
+        return pkgs
+
+    if rez_scan.is_available(ctx_pkg):
+        pkgs.append(ctx_pkg)
+    else:
+        log.warning(
+            "%s is not released yet — launching without it. In-DCC tools must "
+            "fall back to the SHOTDECK_* variables. Build it with: "
+            "cd rez/%s && rez build -ic", ctx_pkg, ctx_pkg)
     return pkgs
 
 

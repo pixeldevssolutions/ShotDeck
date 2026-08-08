@@ -68,3 +68,27 @@ def command_for(package):
 def request(package, version=None):
     """The rez request string for a package, e.g. 'maya-2026'."""
     return f"{package}-{version}" if version else package
+
+
+def package_paths():
+    """Every root rez will search, newest config wins over our defaults."""
+    raw = os.environ.get("REZ_PACKAGES_PATH", "")
+    if raw:
+        return [p for p in raw.split(os.pathsep) if p]
+    return list(config.REZ_PACKAGE_PATHS)
+
+
+def is_available(package):
+    """True if any rez root holds this package family.
+
+    Cheap directory check rather than `rez search`, which costs a full
+    config load and shows up as lag on every menu open.
+    """
+    for root in package_paths():
+        family = os.path.join(root, package)
+        if not os.path.isdir(family):
+            continue
+        for entry in os.listdir(family):
+            if os.path.isdir(os.path.join(family, entry)):
+                return True
+    return False

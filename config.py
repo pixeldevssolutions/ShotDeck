@@ -98,6 +98,19 @@ REZ_EXECUTABLE = os.environ.get("SHOTDECK_REZ_EXECUTABLE", "rez")
 DCC_PACKAGES_ROOT = os.environ.get(
     "SHOTDECK_DCC_ROOT", "/software/packages/dcc")
 
+# Fallback for checking whether a package exists, used only when
+# REZ_PACKAGES_PATH is not already in the environment. Mirrors the search
+# path in /software/pipeline/init_source/configs/rezconfig.py.
+REZ_PACKAGE_PATHS = [
+    "/software/packages/plugins",
+    "/software/packages/tools",
+    "/software/packages/dcc",
+    "/software/packages/libs",
+    "/software/packages/external",
+    "/software/packages/dev",
+    os.path.expanduser("~/packages"),
+]
+
 # Executable to run inside `rez env <package>`, when it is not just the package
 # name. Add an entry here whenever a package's alias differs from its name.
 DCC_COMMANDS = {
