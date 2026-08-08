@@ -10,30 +10,60 @@ class SGClient:
             from sgdesk_dcc.devkit.mock_sg import MockShotgun
             self.sg = MockShotgun()
             self._owner = None
+            self._owner_value = None
             return
+        if not config.SG_SCRIPT_KEY:
+            raise RuntimeError(
+                "SG_SCRIPT_KEY is not set. Export it before starting ShotDeck "
+                "(see DEPLOY-ROCKY9.md, step 5) — it is deliberately not "
+                "stored in the source.")
         self.sg = shotgun_api3.Shotgun(
             config.SG_SITE,
             script_name=config.SG_SCRIPT_NAME,
             api_key=config.SG_SCRIPT_KEY,
         )
         self._owner = None
+        self._owner_value = None
 
     # -- user / owner -----------------------------------------------------
 
-    def resolve_owner(self, login):
-        """Find the entity that sg_task_owner points to for this login."""
+    def resolve_owner(self, user_email):
+        """Look up the user entity for this email address.
+
+        In entity mode the entity itself is used in the task filter. In string
+        mode (the default here) it is only used to obtain the value that
+        Task.sg_assigned_to stores -- see config.TASK_OWNER_STRING_FIELD.
+        """
+        fields = [config.TASK_OWNER_MATCH_FIELD, "name"]
+        if config.TASK_OWNER_STRING_FIELD not in fields:
+            fields.append(config.TASK_OWNER_STRING_FIELD)
         self._owner = self.sg.find_one(
             config.TASK_OWNER_ENTITY,
-            [[config.TASK_OWNER_MATCH_FIELD, "is", login]],
-            [config.TASK_OWNER_MATCH_FIELD, "name"]
-            if config.TASK_OWNER_ENTITY != "HumanUser"
-            else ["login", "name"],
+            [[config.TASK_OWNER_MATCH_FIELD, "is", user_email]],
+            fields,
         )
+        self._owner_value = self._owner_string(user_email)
         return self._owner
+
+    def _owner_string(self, user_email):
+        """The value to compare Task.sg_assigned_to against, in string mode."""
+        if config.TASK_OWNER_IS_ENTITY:
+            return None
+        if self._owner:
+            value = self._owner.get(config.TASK_OWNER_STRING_FIELD)
+            if value:
+                return value
+        # No matching entity, or the field is empty on it: the email address is
+        # still worth trying, since that is what the tasks most likely store.
+        return user_email
 
     @property
     def owner(self):
         return self._owner
+
+    @property
+    def owner_value(self):
+        return self._owner_value
 
     # -- queries -----------------------------------------------------------
 
@@ -61,12 +91,24 @@ class SGClient:
         return out
 
     def my_tasks(self, project, statuses=None):
-        if not self._owner:
-            return []
+        if config.TASK_OWNER_IS_ENTITY:
+            if not self._owner:
+                return []
+            owner_filter = [
+                config.TASK_OWNER_FIELD, "is",
+                {"type": self._owner["type"], "id": self._owner["id"]},
+            ]
+        else:
+            if not self._owner_value:
+                return []
+            owner_filter = [
+                config.TASK_OWNER_FIELD,
+                config.TASK_OWNER_STRING_OP,
+                self._owner_value,
+            ]
         filters = [
             ["project", "is", {"type": "Project", "id": project["id"]}],
-            [config.TASK_OWNER_FIELD, "is",
-             {"type": self._owner["type"], "id": self._owner["id"]}],
+            owner_filter,
         ]
         if statuses:
             filters.append(["sg_status_list", "in", statuses])

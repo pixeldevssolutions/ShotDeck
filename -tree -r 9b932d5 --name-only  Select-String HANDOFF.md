@@ -1,0 +1,49 @@
+[33mcommit 9b932d5bf756ec15e8526ceb233a68b33af52c65[m[33m ([m[1;31morigin/dev[m[33m)[m
+Author: jiteshghasedev <jiteshghasedev@gmail.com>
+Date:   Sat Aug 8 17:53:34 2026 +0530
+
+    Match tasks by email, handle sg_assigned_to as a string, drop committed key
+    
+    Task ownership now resolves the current user by email address (HumanUser.email)
+    rather than login, deriving <os-login>@5and8.ai and honouring SGDESK_USER_EMAIL
+    and SGDESK_EMAIL_DOMAIN overrides. Both SGDESK_USER and SGDESK_USER_EMAIL are
+    injected into launched DCCs.
+    
+    sg_assigned_to turned out to be a plain String field on this site, not an entity
+    link -- filtering with an entity dict fails with "expected [String, NilClass]
+    data type(s) but got Hash". my_tasks() now branches on TASK_OWNER_IS_ENTITY and
+    compares the string directly; resolve_owner() supplies the value to match and
+    falls back to the email address when no HumanUser matches.
+    
+    The ShotGrid script key is no longer defaulted in config.py. SGClient now fails
+    with a clear message when SG_SCRIPT_KEY is unset. The key that was previously
+    committed must be rotated -- it remains readable in this repository history.
+    
+    Also adds HANDOFF.md and DEPLOY-ROCKY9.md, a .gitignore, and untracks
+    __pycache__ and .idea.
+    
+    Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+
+ .gitignore                                     |  16 [32m++[m
+ .idea/.gitignore                               |   3 [31m-[m
+ .idea/inspectionProfiles/profiles_settings.xml |   6 [31m-[m
+ .idea/misc.xml                                 |   7 [31m-[m
+ .idea/modules.xml                              |   8 [31m-[m
+ .idea/sgdesk.iml                               |  15 [31m--[m
+ DEPLOY-ROCKY9.md                               | 293 [32m+++++++++++++++++++++++++[m
+ HANDOFF.md                                     | 228 [32m+++++++++++++++++++[m
+ README.md                                      |  15 [32m+[m[31m-[m
+ __pycache__/config.cpython-310.pyc             | Bin [31m883[m -> [32m0[m bytes
+ __pycache__/env_resolver.cpython-310.pyc       | Bin [31m1644[m -> [32m0[m bytes
+ __pycache__/launcher.cpython-310.pyc           | Bin [31m1505[m -> [32m0[m bytes
+ __pycache__/sg_client.cpython-310.pyc          | Bin [31m2627[m -> [32m0[m bytes
+ config.py                                      |  39 [32m+++[m[31m-[m
+ launcher.py                                    |  16 [32m+[m[31m-[m
+ sg_client.py                                   |  62 [32m+++++[m[31m-[m
+ ui/__pycache__/__init__.cpython-310.pyc        | Bin [31m155[m -> [32m0[m bytes
+ ui/__pycache__/main_window.cpython-310.pyc     | Bin [31m5368[m -> [32m0[m bytes
+ ui/__pycache__/project_page.cpython-310.pyc    | Bin [31m2260[m -> [32m0[m bytes
+ ui/__pycache__/software_page.cpython-310.pyc   | Bin [31m4498[m -> [32m0[m bytes
+ ui/__pycache__/widgets.cpython-310.pyc         | Bin [31m4440[m -> [32m0[m bytes
+ ui/main_window.py                              |  19 [32m+[m[31m-[m
+ 22 files changed, 656 insertions(+), 71 deletions(-)
