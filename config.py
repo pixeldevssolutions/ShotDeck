@@ -52,6 +52,12 @@ SOFTWARE_FIELDS = [
 
 PROJECT_FIELDS = ["name", "sg_status", "image", "sg_description", "tank_name"]
 
+# Field on Software holding the rez request, e.g. "maya-2024 keentools-6.2".
+SOFTWARE_REZ_FIELD = "sg_rez_packages"
+# Package appended to every rez request so in-DCC tools can `import
+# shotdeck_context`. Set to "" to stop injecting it.
+REZ_CONTEXT_PACKAGE = "shotdeck_context"
+
 # Per-project env YAMLs live here; falls back to default.yml
 ENVS_DIR = os.path.join(os.path.dirname(__file__), "envs")
 

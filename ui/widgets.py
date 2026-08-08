@@ -82,6 +82,7 @@ STYLE = """
 QMainWindow, QWidget { background: #2b2b2b; color: #d5d5d5;
     font-family: 'Open Sans', 'Segoe UI', sans-serif; font-size: 12px; }
 #header { background: #1f1f1f; }
+#contextBar { background: #1f1f1f; color: #8f8f8f; border-top: 1px solid #3a3a3a; }
 #headerTitle { font-size: 15px; font-weight: 600; color: #ffffff; }
 #backBtn { background: transparent; border: none; color: #18a7e0;
     font-size: 13px; padding: 4px 10px; }

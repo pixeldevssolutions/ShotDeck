@@ -1,7 +1,7 @@
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QScrollArea, QGridLayout, QTabWidget,
-    QTableWidget, QTableWidgetItem, QHeaderView, QLineEdit,
+    QTableWidget, QTableWidgetItem, QHeaderView, QLineEdit, QLabel,
 )
 
 from .widgets import Tile
@@ -46,9 +46,12 @@ class SoftwareGrid(QWidget):
 class TasksTable(QWidget):
     COLS = ["Task", "Link", "Step", "Status", "Due"]
 
+    task_selected = Signal(object)   # the Task dict, or None
+
     def __init__(self):
         super().__init__()
         self._tasks = []
+        self._rows = []              # row index -> task dict, after filtering
         lay = QVBoxLayout(self)
         lay.setContentsMargins(16, 12, 16, 12)
 
@@ -64,15 +67,26 @@ class TasksTable(QWidget):
         self.table.setAlternatingRowColors(True)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.table.setSelectionMode(QTableWidget.SingleSelection)
+        self.table.itemSelectionChanged.connect(self._on_selection)
         lay.addWidget(self.table)
 
     def set_tasks(self, tasks):
         self._tasks = tasks
         self._rebuild()
 
+    def _on_selection(self):
+        rows = self.table.selectionModel().selectedRows()
+        if not rows:
+            self.task_selected.emit(None)
+            return
+        r = rows[0].row()
+        self.task_selected.emit(self._rows[r] if r < len(self._rows) else None)
+
     def _rebuild(self):
         text = self.search.text().lower()
         self.table.setRowCount(0)
+        self._rows = []
         for t in self._tasks:
             entity = (t.get("entity") or {}).get("name", "")
             step = (t.get("step") or {}).get("name", "")
@@ -84,6 +98,7 @@ class TasksTable(QWidget):
                 continue
             r = self.table.rowCount()
             self.table.insertRow(r)
+            self._rows.append(t)
             for c, v in enumerate(row_vals):
                 item = QTableWidgetItem(str(v))
                 item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
@@ -92,6 +107,7 @@ class TasksTable(QWidget):
 
 class SoftwarePage(QWidget):
     software_launched = Signal(dict)
+    task_selected = Signal(object)
 
     def __init__(self):
         super().__init__()
@@ -105,10 +121,31 @@ class SoftwarePage(QWidget):
         self.tabs.addTab(self.tasks, "My Tasks")
         lay.addWidget(self.tabs)
 
+        # Which task an app will be launched against. Artists need to see this
+        # before launching, because it decides where a publish lands.
+        self.context_lbl = QLabel()
+        self.context_lbl.setObjectName("contextBar")
+        self.context_lbl.setContentsMargins(16, 6, 16, 6)
+        lay.addWidget(self.context_lbl)
+        self.set_task(None)
+
         self.apps.software_launched.connect(self.software_launched)
+        self.tasks.task_selected.connect(self.set_task)
+        self.tasks.task_selected.connect(self.task_selected)
 
     def set_software(self, softwares):
         self.apps.set_software(softwares)
 
     def set_tasks(self, tasks):
         self.tasks.set_tasks(tasks)
+
+    def set_task(self, task):
+        if not task:
+            self.context_lbl.setText(
+                "No task selected — apps launch without a publish context. "
+                "Pick one in My Tasks.")
+            return
+        entity = (task.get("entity") or {}).get("name", "")
+        step = (task.get("step") or {}).get("name", "")
+        bits = [b for b in (entity, step, task.get("content", "")) if b]
+        self.context_lbl.setText("Publishing to:  " + "  ›  ".join(bits))

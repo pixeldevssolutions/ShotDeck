@@ -38,3 +38,74 @@ A key ending in `+` prepends to the existing var (`PYTHONPATH+`).
 
 `launcher.launch()` runs `linux_path linux_args` via `subprocess.Popen` with the
 merged env and `start_new_session=True` so DCCs survive PixelDesk closing.
+
+## Launching through rez
+
+Set `sg_rez_packages` on the Software entity to a rez request, e.g.
+`maya-2024 keentools-6.2`. The app is then started as:
+
+```
+rez env <sg_rez_packages> shotdeck_context -- <linux_path> <linux_args>
+```
+
+With rez packages set, `linux_path` may be a bare command name (`maya`) because
+the packages put it on `PATH`; if it is left empty, the Software `code`
+lowercased is used as the command, so a package publishing a `keentools` alias
+needs no path at all. Without rez packages, `linux_path` must be a real absolute
+path — nothing else resolves it.
+
+`shotdeck_context` is appended to every rez request automatically (set
+`REZ_CONTEXT_PACKAGE = ""` in `config.py` to stop that).
+
+### Building a rez package
+
+Studio convention, using KeenTools as the example:
+
+```
+dev/KeenTools/            <- package folder, named after the package
+    KeenTools6.2/         <- the DCC or plugin payload
+    package.py            <- name, version, variants, commands()
+    REZ_INSTALLER.py      <- copies the payload into REZ_BUILD_INSTALL_PATH
+```
+
+`package.py` sets `build_command = "python {root}/REZ_INSTALLER.py"`, and
+`variants` drives the platform/arch folders that get created. Then, from inside
+the package folder:
+
+```bash
+rez build -ic                 # installs to ~/packages
+# new terminal:
+rez env keentools             # verify it resolves and runs
+git push                      # if the package has a repo
+rez release .                 # installs to /software/packages (set in rez config)
+# rename or remove the local ~/packages copy, then re-test rez env
+```
+
+`rez/shotdeck_context/` in this repository is a working example of that layout —
+build and release it once, and every DCC launched by ShotDeck can import it.
+
+## Publish context inside the DCC
+
+Every launch writes a JSON context file and exports `SHOTDECK_CONTEXT_FILE`
+pointing at it, plus flat `SHOTDECK_*` variables (`SHOTDECK_TASK_ID`,
+`SHOTDECK_ENTITY_TYPE`, `SHOTDECK_ENTITY_ID`, `SHOTDECK_STEP`,
+`SHOTDECK_PROJECT_ID`, …) for shell scripts and rez `commands()` blocks.
+
+The task comes from the row selected in the **My Tasks** tab; the bar under the
+tabs shows which task an app will launch against. Launching with nothing
+selected is allowed — the context is written with `task: null`.
+
+In-DCC tools should use the package rather than reading the variables:
+
+```python
+import shotdeck_context
+
+ctx = shotdeck_context.get()
+if ctx.has_task:
+    publish(task=ctx.task_id, entity=(ctx.entity_type, ctx.entity_id))
+else:
+    warn("Launched without a task — pick one in ShotDeck and relaunch.")
+```
+
+`get()` never raises: outside a ShotDeck launch it returns an empty `Context`
+that is falsey, so tools degrade instead of tracebacking at an artist.
