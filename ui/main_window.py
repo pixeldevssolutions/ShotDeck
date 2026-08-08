@@ -84,6 +84,7 @@ class MainWindow(QMainWindow):
         self.project_page.project_selected.connect(self.open_project)
         self.software_page.software_launched.connect(self.launch_software)
         self.software_page.task_selected.connect(self._on_task_selected)
+        self.software_page.package_launched.connect(self.launch_package)
 
         self.statusBar().showMessage("Connecting to ShotGrid...")
         self._run(self._bootstrap, self._on_bootstrap)
@@ -155,6 +156,19 @@ class MainWindow(QMainWindow):
 
     def _on_task_selected(self, task):
         self.task = task
+
+    def launch_package(self, task, package, version):
+        """Right-click launch: a DCC from the rez tree, opened on this task."""
+        self.task = task
+        self.software_page.set_task(task)
+        try:
+            pid = launcher.launch_package(
+                self.project, package, version, task, self.login, self.email)
+            self.statusBar().showMessage(
+                f"Launched {package}-{version} (pid {pid}) "
+                f"on task '{task.get('content', '')}'")
+        except Exception as e:
+            QMessageBox.critical(self, "Launch failed", str(e))
 
     def launch_software(self, software):
         try:

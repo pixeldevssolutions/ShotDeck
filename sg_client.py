@@ -84,9 +84,12 @@ class SGClient:
         out = []
         for sw in sws:
             links = sw.get("projects") or []
-            if not links or any(p["id"] == project["id"] for p in links):
-                if sw.get("linux_path"):
-                    out.append(sw)
+            if links and not any(p["id"] == project["id"] for p in links):
+                continue
+            # Launchable means either a real path, or a rez request that
+            # supplies the command itself.
+            if sw.get("linux_path") or sw.get(config.SOFTWARE_REZ_FIELD):
+                out.append(sw)
         return out
 
     def my_tasks(self, project, statuses=None):

@@ -58,6 +58,29 @@ SOFTWARE_REZ_FIELD = "sg_rez_packages"
 # shotdeck_context`. Set to "" to stop injecting it.
 REZ_CONTEXT_PACKAGE = "shotdeck_context"
 
+# Released DCC packages, one folder per package and per version inside it.
+# The right-click menu on a task is built from this tree.
+DCC_PACKAGES_ROOT = os.environ.get(
+    "SHOTDECK_DCC_ROOT", "/software/packages/dcc")
+
+# Executable to run inside `rez env <package>`, when it is not just the package
+# name. Add an entry here whenever a package's alias differs from its name.
+DCC_COMMANDS = {
+    "3de": "DD3DE4",
+    "mochapro": "mocha",
+    "openrv": "rv",
+    "silhouette": "sfx",
+}
+
+# Pretty names for the menu. Anything absent is title-cased.
+DCC_LABELS = {
+    "3de": "3DEqualizer",
+    "openrv": "OpenRV",
+    "mochapro": "Mocha Pro",
+    "pureref": "PureRef",
+    "meshlab": "MeshLab",
+}
+
 # Per-project env YAMLs live here; falls back to default.yml
 ENVS_DIR = os.path.join(os.path.dirname(__file__), "envs")
 

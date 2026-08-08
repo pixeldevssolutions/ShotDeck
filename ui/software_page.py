@@ -1,9 +1,12 @@
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QScrollArea, QGridLayout, QTabWidget,
-    QTableWidget, QTableWidgetItem, QHeaderView, QLineEdit, QLabel,
+    QTableWidget, QTableWidgetItem, QHeaderView, QLineEdit, QLabel, QMenu,
 )
 
+import config
+import rez_scan
 from .widgets import Tile
 
 
@@ -46,12 +49,14 @@ class SoftwareGrid(QWidget):
 class TasksTable(QWidget):
     COLS = ["Task", "Link", "Step", "Status", "Due"]
 
-    task_selected = Signal(object)   # the Task dict, or None
+    task_selected = Signal(object)          # the Task dict, or None
+    package_launched = Signal(object, str, str)   # task, package, version
 
     def __init__(self):
         super().__init__()
         self._tasks = []
         self._rows = []              # row index -> task dict, after filtering
+        self._packages = []          # [(package, [versions]), ...] from disk
         lay = QVBoxLayout(self)
         lay.setContentsMargins(16, 12, 16, 12)
 
@@ -69,6 +74,8 @@ class TasksTable(QWidget):
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setSelectionMode(QTableWidget.SingleSelection)
         self.table.itemSelectionChanged.connect(self._on_selection)
+        self.table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._on_context_menu)
         lay.addWidget(self.table)
 
     def set_tasks(self, tasks):
@@ -82,6 +89,52 @@ class TasksTable(QWidget):
             return
         r = rows[0].row()
         self.task_selected.emit(self._rows[r] if r < len(self._rows) else None)
+
+    def _on_context_menu(self, pos):
+        """Right-click a task: pick a DCC and version to open it with."""
+        index = self.table.indexAt(pos)
+        if not index.isValid() or index.row() >= len(self._rows):
+            return
+        task = self._rows[index.row()]
+        self.table.selectRow(index.row())
+
+        # Scanned lazily so a newly released package shows up without a
+        # restart, and so a slow or absent mount costs nothing until asked.
+        self._packages = rez_scan.scan()
+
+        menu = QMenu(self)
+        entity = (task.get("entity") or {}).get("name", "")
+        header = menu.addAction(
+            "Open {0} with…".format(entity or task.get("content", "task")))
+        header.setEnabled(False)
+        menu.addSeparator()
+
+        if not self._packages:
+            empty = menu.addAction(
+                "No packages found in {0}".format(config.DCC_PACKAGES_ROOT))
+            empty.setEnabled(False)
+            menu.exec(self.table.viewport().mapToGlobal(pos))
+            return
+
+        for package, versions in self._packages:
+            label = config.DCC_LABELS.get(package, package.title())
+            if len(versions) == 1:
+                act = QAction("{0}  {1}".format(label, versions[0]), menu)
+                act.triggered.connect(
+                    lambda _=False, p=package, v=versions[0]:
+                    self.package_launched.emit(task, p, v))
+                menu.addAction(act)
+                continue
+            sub = menu.addMenu(label)
+            for i, version in enumerate(versions):
+                text = version + ("   (latest)" if i == 0 else "")
+                act = QAction(text, sub)
+                act.triggered.connect(
+                    lambda _=False, p=package, v=version:
+                    self.package_launched.emit(task, p, v))
+                sub.addAction(act)
+
+        menu.exec(self.table.viewport().mapToGlobal(pos))
 
     def _rebuild(self):
         text = self.search.text().lower()
@@ -108,6 +161,7 @@ class TasksTable(QWidget):
 class SoftwarePage(QWidget):
     software_launched = Signal(dict)
     task_selected = Signal(object)
+    package_launched = Signal(object, str, str)
 
     def __init__(self):
         super().__init__()
@@ -132,6 +186,7 @@ class SoftwarePage(QWidget):
         self.apps.software_launched.connect(self.software_launched)
         self.tasks.task_selected.connect(self.set_task)
         self.tasks.task_selected.connect(self.task_selected)
+        self.tasks.package_launched.connect(self.package_launched)
 
     def set_software(self, softwares):
         self.apps.set_software(softwares)
