@@ -1,0 +1,16 @@
+# Studio-wide baseline. Token expansion: {PROJECT_NAME} {PROJECT_CODE} {PROJECT_ID}
+# Keys ending in "+" are prepended to the existing value (PATH style).
+env:
+  STUDIO_ROOT: /mnt/projects
+  PROJECT_ROOT: /mnt/projects/{PROJECT_CODE}
+  OCIO: /mnt/pipeline/ocio/aces_1.3/config.ocio
+  PYTHONPATH+: /mnt/pipeline/python
+
+software:
+  nuke:
+    NUKE_PATH: /mnt/pipeline/nuke:{PROJECT_ROOT}/pipeline/nuke
+  maya:
+    MAYA_MODULE_PATH: /mnt/pipeline/maya/modules
+    MAYA_SCRIPT_PATH+: "{PROJECT_ROOT}/pipeline/maya/scripts"
+  blender:
+    BLENDER_USER_SCRIPTS: /mnt/pipeline/blender/scripts

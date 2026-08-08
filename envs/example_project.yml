@@ -1,0 +1,8 @@
+# envs/<tank_name>.yml — overrides for one project
+env:
+  PROJECT_FPS: "24"
+  COLORSPACE: ACEScg
+
+software:
+  nuke:
+    NUKE_PATH+: "{PROJECT_ROOT}/nuke/gizmos"
