@@ -89,6 +89,154 @@ SOFTWARE_REZ_FIELD = "sg_rez_packages"
 # shotdeck_context`. Set to "" to stop injecting it.
 REZ_CONTEXT_PACKAGE = "shotdeck_context"
 
+# -- standalone publish ----------------------------------------------------
+
+# Field on Version linking it back to the Task. Stock ShotGrid uses sg_task.
+VERSION_TASK_FIELD = "sg_task"
+# Field linking the Version to the Shot or Asset.
+VERSION_ENTITY_FIELD = "entity"
+# Field the media is uploaded to. This is what the SG player streams.
+VERSION_MEDIA_FIELD = "sg_uploaded_movie"
+# Status a freshly published Version gets. "" leaves it at the site default.
+VERSION_STATUS = "rev"
+
+# -- the version browser ---------------------------------------------------
+
+# Fields read for the browser. Deep fields keep it to one query: the step comes
+# off the linked task rather than a second round trip. A field the site does
+# not have makes the whole find() fail, so anything non-stock added here has to
+# exist -- VERSION_OPTIONAL_FIELDS below is the safe place for the rest.
+VERSION_FIELDS = [
+    "code", "description", "sg_status_list", "user", "created_by",
+    "created_at", "updated_at", "entity", "sg_task", "image",
+    "sg_uploaded_movie", "sg_path_to_movie", "sg_path_to_frames",
+    "sg_first_frame", "sg_last_frame", "frame_count", "frame_range",
+    "sg_task.Task.step",
+    "sg_task.Task.content",
+]
+
+# Tried once and dropped for the session if the site does not have them, so a
+# studio-specific field can be listed without risking every query.
+VERSION_OPTIONAL_FIELDS = []
+
+# Versions fetched per page in the browser. The rest arrive on Load more.
+VERSION_PAGE_SIZE = 100
+
+# How long the browser waits after a keystroke before querying ShotGrid.
+SEARCH_DEBOUNCE_MS = 300
+
+# Detail URL for an entity, used by "Open in ShotGrid".
+def entity_url(entity_type, entity_id):
+    return f"{SG_SITE.rstrip('/')}/detail/{entity_type}/{entity_id}"
+
+# Extensions treated as movies rather than stills.
+MOVIE_EXTENSIONS = {
+    ".mov", ".mp4", ".mxf", ".avi", ".mkv", ".webm", ".m4v", ".r3d",
+}
+IMAGE_EXTENSIONS = {
+    ".jpg", ".jpeg", ".png", ".tif", ".tiff", ".exr", ".dpx", ".tga", ".bmp",
+}
+
+# The one registry every extension check goes through. Add a format here and
+# the file dialogs, the drop routing, the inspector and the publish validation
+# all learn about it at once.
+MEDIA_TYPES = {
+    "movie": MOVIE_EXTENSIONS,
+    "image": IMAGE_EXTENSIONS,
+}
+
+
+def media_kind(path):
+    """"movie", "image", or "" for something we do not publish as media."""
+    ext = os.path.splitext(path or "")[1].lower()
+    for kind, extensions in MEDIA_TYPES.items():
+        if ext in extensions:
+            return kind
+    return ""
+
+
+def media_filter():
+    """Qt file dialog filter string, built from the registry."""
+    movies = " ".join(f"*{e}" for e in sorted(MOVIE_EXTENSIONS))
+    images = " ".join(f"*{e}" for e in sorted(IMAGE_EXTENSIONS))
+    return (f"Media ({movies} {images});;Movies ({movies});;"
+            f"Images ({images});;All files (*)")
+
+
+# Media inspection. ffprobe reads movies and stills alike, including EXR and
+# DPX; without it the dialog falls back to Qt's image reader and file size.
+FFPROBE = os.environ.get("SHOTDECK_FFPROBE", "ffprobe")
+FFPROBE_TIMEOUT = 20
+
+# -- the optional work file ------------------------------------------------
+#
+# A publish may carry the DCC scene that produced the media (a .nk, .ma, .hip).
+# It is always optional, and a failure to register it never fails the publish
+# itself -- the Version and its media are already in ShotGrid by then.
+
+# Scene files offered in the work file browser, mapped to a menu label.
+WORKFILE_EXTENSIONS = {
+    ".nk": "Nuke script",
+    ".nknc": "Nuke script",
+    ".ma": "Maya scene",
+    ".mb": "Maya scene",
+    ".hip": "Houdini scene",
+    ".hipnc": "Houdini scene",
+    ".hiplc": "Houdini scene",
+    ".blend": "Blender scene",
+    ".c4d": "Cinema 4D scene",
+    ".3de": "3DEqualizer scene",
+    ".mocha": "Mocha project",
+    ".sfx": "Silhouette project",
+    ".spp": "Substance Painter project",
+    ".sbs": "Substance Designer graph",
+    ".psd": "Photoshop document",
+    ".aep": "After Effects project",
+    ".katana": "Katana scene",
+    ".usd": "USD scene",
+    ".usda": "USD scene",
+    ".usdc": "USD scene",
+    ".zpr": "ZBrush project",
+    ".ztl": "ZBrush tool",
+}
+
+# How the work file is registered in ShotGrid:
+#   "published_file" - create a PublishedFile pointing at the file where it
+#                      already lives on /jobs. Nothing is uploaded, which is
+#                      the point: scene files are large and already on shared
+#                      storage. Needs create permission on PublishedFile.
+#   "attachment"     - upload the file itself onto the Version. Simplest
+#                      permission-wise, but it copies the bytes into ShotGrid.
+#   "path_only"      - write the path onto the Version and nothing else.
+WORKFILE_MODE = os.environ.get("SHOTDECK_WORKFILE_MODE", "published_file")
+
+# Fields used when WORKFILE_MODE is "published_file". All stock names.
+PUBLISHED_FILE_TASK_FIELD = "task"
+PUBLISHED_FILE_ENTITY_FIELD = "entity"
+PUBLISHED_FILE_VERSION_FIELD = "version"
+PUBLISHED_FILE_PATH_FIELD = "path"
+
+# PublishedFileType looked up per extension. A type that does not exist on the
+# site is skipped rather than created, so this list can be optimistic.
+PUBLISHED_FILE_TYPES = {
+    ".nk": "Nuke Script",
+    ".nknc": "Nuke Script",
+    ".ma": "Maya Scene",
+    ".mb": "Maya Scene",
+    ".hip": "Houdini Scene",
+    ".hipnc": "Houdini Scene",
+    ".blend": "Blender Scene",
+    ".psd": "Photoshop Document",
+    ".aep": "After Effects Project",
+    ".usd": "USD Scene",
+    ".usda": "USD Scene",
+}
+
+# Text field on Version holding the work file path, so the path is visible
+# without opening the PublishedFile. Leave "" to append it to the description
+# instead, which is the only text field every site is guaranteed to have.
+VERSION_WORKFILE_FIELD = os.environ.get("SHOTDECK_VERSION_WORKFILE_FIELD", "")
+
 # rez entry point. Set SHOTDECK_REZ_EXECUTABLE to an absolute path when the
 # artist's login shell does not put rez on PATH.
 REZ_EXECUTABLE = os.environ.get("SHOTDECK_REZ_EXECUTABLE", "rez")

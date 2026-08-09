@@ -69,6 +69,22 @@ def folders(project, task):
     return out
 
 
+def open_url(url):
+    """Open a ShotGrid page in the desktop browser.
+
+    Same opener as the folders, because xdg-open is the desktop's own idea of
+    what a URL should do -- ShotDeck does not need its own browser handling.
+    """
+    opener = config.FILE_MANAGER
+    if opener and shutil.which(opener.split()[0]) is None:
+        raise RuntimeError(
+            f"{opener.split()[0]} is not installed, so the page can't be "
+            f"opened.\n\nURL:\n{url}")
+    log.info("opening %s", url)
+    subprocess.Popen(opener.split() + [url], start_new_session=True,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
 def open_folder(path):
     """Hand the folder to whatever file manager the desktop uses."""
     if not os.path.isdir(path):

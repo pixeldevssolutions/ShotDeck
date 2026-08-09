@@ -15,6 +15,9 @@ sgdesk/
 *.env
 .env
 
+# Logs written by tests/run.py
+tests/_logs/
+
 # Internal working notes stay local. README.md is the one tracked exception.
 *.md
 !README.md

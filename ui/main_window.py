@@ -1,6 +1,6 @@
 import getpass
 
-from PySide6.QtCore import Qt, QThreadPool, QRunnable, QObject, Signal
+from PySide6.QtCore import Qt, QThreadPool
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
@@ -8,30 +8,15 @@ from PySide6.QtWidgets import (
 )
 
 import applog, config, launcher, paths
-from .widgets import STYLE
+from . import jobs
+from .widgets import STYLE, Avatar
 from .console import ConsolePanel
 from .project_page import ProjectPage
+from .publish_dialog import PublishDialog
 from .software_page import SoftwarePage
+from .version_browser import VersionBrowser
 
 log = applog.get()
-
-
-class _WorkerSignals(QObject):
-    result = Signal(object)
-    error = Signal(str)
-
-
-class _Worker(QRunnable):
-    def __init__(self, fn, *args):
-        super().__init__()
-        self.fn, self.args = fn, args
-        self.signals = _WorkerSignals()
-
-    def run(self):
-        try:
-            self.signals.result.emit(self.fn(*self.args))
-        except Exception as e:
-            self.signals.error.emit(str(e))
 
 
 class MainWindow(QMainWindow):
@@ -43,9 +28,11 @@ class MainWindow(QMainWindow):
         self.project = None
         self.task = None          # Task an app will be launched against
         self.pool = QThreadPool.globalInstance()
+        self._jobs = set()        # in-flight workers, see _run()
 
         self.setWindowTitle(config.APP_TITLE)
-        self.resize(880, 640)
+        self.resize(1080, 720)
+        self.setMinimumSize(760, 480)
         self.setStyleSheet(STYLE)
 
         central = QWidget()
@@ -57,20 +44,33 @@ class MainWindow(QMainWindow):
         # header
         header = QWidget()
         header.setObjectName("header")
-        header.setFixedHeight(48)
+        header.setFixedHeight(54)
         h = QHBoxLayout(header)
-        h.setContentsMargins(12, 0, 16, 0)
+        h.setContentsMargins(16, 0, 16, 0)
+        h.setSpacing(4)
 
-        self.back_btn = QPushButton("\u2039 Projects")
+        self.back_btn = QPushButton("\u2039  Projects")
         self.back_btn.setObjectName("backBtn")
         self.back_btn.setCursor(Qt.PointingHandCursor)
         self.back_btn.clicked.connect(self.show_projects)
         self.back_btn.hide()
         h.addWidget(self.back_btn)
 
+        # Breadcrumb: app name, then the project once one is open.
         self.title = QLabel(config.APP_TITLE)
         self.title.setObjectName("headerTitle")
         h.addWidget(self.title)
+
+        self.crumb = QLabel("\u203a")
+        self.crumb.setObjectName("crumb")
+        self.crumb.hide()
+        h.addWidget(self.crumb)
+
+        self.crumb_project = QLabel("")
+        self.crumb_project.setObjectName("headerTitle")
+        self.crumb_project.hide()
+        h.addWidget(self.crumb_project)
+
         h.addStretch()
 
         self.term_btn = QPushButton("Terminal")
@@ -82,8 +82,16 @@ class MainWindow(QMainWindow):
         self.term_btn.toggled.connect(self.toggle_console)
         h.addWidget(self.term_btn)
 
-        self.user_lbl = QLabel(self.email)
-        h.addWidget(self.user_lbl)
+        chip = QWidget()
+        chip.setObjectName("userChip")
+        chip_lay = QHBoxLayout(chip)
+        chip_lay.setContentsMargins(4, 0, 10, 0)
+        chip_lay.setSpacing(8)
+        chip_lay.addWidget(Avatar(self.email))
+        self.user_lbl = QLabel(self.email.split("@")[0])
+        self.user_lbl.setToolTip(self.email)
+        chip_lay.addWidget(self.user_lbl)
+        h.addWidget(chip)
         root.addWidget(header)
 
         # pages, with the terminal as a collapsible bottom pane
@@ -100,9 +108,10 @@ class MainWindow(QMainWindow):
         self.split = QSplitter(Qt.Vertical)
         self.split.addWidget(self.stack)
         self.split.addWidget(self.console)
-        self.split.setStretchFactor(0, 3)
-        self.split.setStretchFactor(1, 1)
-        self.split.setChildrenCollapsible(False)
+        self.split.setStretchFactor(0, 1)
+        self.split.setStretchFactor(1, 0)
+        self.split.setCollapsible(0, False)
+        self.split.setHandleWidth(1)
         root.addWidget(self.split)
 
         QShortcut(QKeySequence("Ctrl+`"), self,
@@ -113,6 +122,9 @@ class MainWindow(QMainWindow):
         self.software_page.task_selected.connect(self._on_task_selected)
         self.software_page.package_launched.connect(self.launch_package)
         self.software_page.folder_requested.connect(self.open_folder)
+        self.software_page.status_change_requested.connect(self.set_task_status)
+        self.software_page.publish_requested.connect(self.publish_version)
+        self.software_page.versions_requested.connect(self.view_versions)
 
         self.statusBar().showMessage("Connecting to ShotGrid...")
         self._run(self._bootstrap, self._on_bootstrap)
@@ -121,9 +133,13 @@ class MainWindow(QMainWindow):
 
     def toggle_console(self, shown):
         self.console.setVisible(shown)
-        if shown and self.split.sizes()[1] < 80:
-            total = sum(self.split.sizes()) or self.height()
-            self.split.setSizes([int(total * 0.65), int(total * 0.35)])
+        # Hiding alone is not enough: the splitter keeps the pane's share and
+        # leaves a dead strip at the bottom, so the sizes are set by hand.
+        total = sum(self.split.sizes()) or self.split.height() or self.height()
+        if shown:
+            self.split.setSizes([int(total * 0.62), int(total * 0.38)])
+        else:
+            self.split.setSizes([total, 0])
 
     def show_console(self):
         if not self.term_btn.isChecked():
@@ -131,22 +147,24 @@ class MainWindow(QMainWindow):
 
     # -- async helper ------------------------------------------------------
 
-    def _run(self, fn, on_result, *args):
-        worker = _Worker(fn, *args)
-        worker.signals.result.connect(on_result)
-        worker.signals.error.connect(
-            lambda msg: QMessageBox.critical(self, "ShotGrid", msg))
-        self.pool.start(worker)
+    def _run(self, fn, on_result, *args, on_error=None):
+        """Run fn on the thread pool and hand the result back on the UI thread."""
+        return jobs.run(
+            self._jobs, fn, on_result, *args, pool=self.pool,
+            on_error=on_error or
+            (lambda msg: QMessageBox.critical(self, "ShotGrid", msg)))
 
     # -- data --------------------------------------------------------------
 
     def _bootstrap(self):
         owner = self.sg.resolve_owner(self.email)
         projects = self.sg.active_projects()
-        return owner, projects
+        statuses = self.sg.task_statuses()
+        return owner, projects, statuses
 
     def _on_bootstrap(self, result):
-        owner, projects = result
+        owner, projects, statuses = result
+        self.software_page.set_statuses(statuses)
         if not owner and config.TASK_OWNER_IS_ENTITY:
             self.statusBar().showMessage(
                 f"No {config.TASK_OWNER_ENTITY} found with "
@@ -168,7 +186,8 @@ class MainWindow(QMainWindow):
     def show_projects(self):
         self.project = None
         self.back_btn.hide()
-        self.title.setText(config.APP_TITLE)
+        self.crumb.hide()
+        self.crumb_project.hide()
         self.stack.setCurrentWidget(self.project_page)
 
     def open_project(self, project):
@@ -176,7 +195,9 @@ class MainWindow(QMainWindow):
         self.task = None
         self.software_page.set_task(None)
         self.software_page.set_project(project)
-        self.title.setText(project["name"])
+        self.crumb_project.setText(project["name"])
+        self.crumb.show()
+        self.crumb_project.show()
         self.back_btn.show()
         self.stack.setCurrentWidget(self.software_page)
         self.software_page.set_software([])
@@ -226,6 +247,65 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             f"Launched {software['code']} (pid {pid}) "
             f"in {self.project['name']} {where} — see Terminal for output")
+
+    def publish_version(self, task):
+        """Standalone publish: upload media as a Version against this task."""
+        self.task = task
+        self.software_page.set_task(task)
+        log.info("standalone publish for task %s (%s)",
+                 task["id"], task.get("content", ""))
+
+        dialog = PublishDialog(self.sg, self.project, task, self.email, self)
+        dialog.exec()
+        result = dialog.published
+        if result:
+            self.statusBar().showMessage(
+                f"Published Version {result.code} to "
+                f"'{task.get('content', '')}' as {self.sg.api_identity}")
+
+    def view_versions(self, task):
+        """Browse what has already been published on this task's entity."""
+        self.task = task
+        self.software_page.set_task(task)
+        if not task.get("entity"):
+            QMessageBox.information(
+                self, "Versions",
+                "This task is not linked to a shot or asset, so it has no "
+                "versions to browse.")
+            return
+        log.info("version browser for %s %s (task %s)",
+                 task["entity"].get("type"), task["entity"].get("name"),
+                 task["id"])
+        VersionBrowser(self.sg, self.project, task, self).exec()
+
+    def set_task_status(self, task, code):
+        """Write a status change back to ShotGrid, off the UI thread."""
+        task_id = task["id"]
+        old = task.get("sg_status_list") or ""
+        self.statusBar().showMessage(
+            f"Setting '{task.get('content', '')}' to {code}…")
+        # Show it straight away; put it back if the write fails.
+        self.software_page.update_task_status(task_id, code)
+
+        def write():
+            self.sg.set_task_status(task_id, code)
+            return task_id, code
+
+        def done(result):
+            _, new_code = result
+            self.statusBar().showMessage(
+                f"'{task.get('content', '')}' is now {new_code}")
+
+        def failed(msg):
+            log.error("could not set status on task %s: %s", task_id, msg)
+            self.software_page.update_task_status(task_id, old)
+            self.show_console()
+            QMessageBox.warning(
+                self, "Status not changed",
+                f"ShotGrid rejected the change:\n\n{msg}\n\n"
+                f"The task is still {old or 'unset'}.")
+
+        self._run(write, done, on_error=failed)
 
     def open_folder(self, path):
         try:

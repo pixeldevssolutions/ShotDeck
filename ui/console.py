@@ -21,16 +21,17 @@ from PySide6.QtWidgets import (
 )
 
 import applog
+from . import theme
 
 POLL_MS = 400
 MAX_BLOCKS = 5000        # trim scrollback; DCCs can be very chatty
 
 LEVEL_COLOURS = {
-    logging.DEBUG: "#7f7f7f",
-    logging.INFO: "#d5d5d5",
-    logging.WARNING: "#e0b040",
-    logging.ERROR: "#e06c60",
-    logging.CRITICAL: "#e06c60",
+    logging.DEBUG: theme.TEXT_FAINT,
+    logging.INFO: theme.TEXT_DIM,
+    logging.WARNING: theme.WARN,
+    logging.ERROR: theme.ERROR,
+    logging.CRITICAL: theme.ERROR,
 }
 
 
@@ -124,9 +125,9 @@ class ConsolePanel(QWidget):
     # -- view --------------------------------------------------------------
 
     def _append(self, line, levelno=logging.INFO, raw=False):
-        colour = LEVEL_COLOURS.get(levelno, "#d5d5d5")
+        colour = LEVEL_COLOURS.get(levelno, theme.TEXT_DIM)
         if raw and line.startswith("#"):
-            colour = "#6f8f6f"          # launch-log header comments
+            colour = theme.OK            # launch-log header comments
         safe = (line.replace("&", "&amp;").replace("<", "&lt;")
                     .replace(">", "&gt;"))
         self.view.appendHtml(
