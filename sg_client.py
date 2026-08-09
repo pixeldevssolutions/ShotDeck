@@ -53,6 +53,7 @@ class SGClient:
         self._version_statuses = None    # Version statuses
         self._steps = None               # pipeline steps, aka departments
         self._version_field_cache = None
+        self._users = {}                 # id -> HumanUser, for note authors
 
     @property
     def api_identity(self):
@@ -315,6 +316,92 @@ class SGClient:
         """Retire a Version -- used to clean up after a cancelled publish."""
         log.info("deleting Version %s", version_id)
         return self.sg.delete("Version", version_id)
+
+    # -- notes -------------------------------------------------------------
+    #
+    # ShotGrid's own model: a Note links to entities through note_links, and
+    # replies are Reply entities pointing back at the Note. ShotDeck stores
+    # nothing of its own -- production notes belong to ShotGrid.
+
+    def notes_for_version(self, version_id):
+        return self.sg.find(
+            "Note",
+            [["note_links", "is", {"type": "Version", "id": version_id}]],
+            config.NOTE_FIELDS,
+            order=[{"field_name": "created_at", "direction": "asc"}],
+        )
+
+    def replies_for_notes(self, note_ids):
+        """Every reply to these notes, in one query rather than one each."""
+        if not note_ids:
+            return []
+        return self.sg.find(
+            "Reply",
+            [["entity", "in",
+              [{"type": "Note", "id": i} for i in note_ids]]],
+            config.REPLY_FIELDS,
+            order=[{"field_name": "created_at", "direction": "asc"}],
+        )
+
+    def create_note(self, project, version, content, subject="", task=None):
+        """A note on a Version, credited to the artist, not to the script."""
+        data = {
+            "project": {"type": "Project", "id": project["id"]},
+            "subject": subject or "",
+            "content": content,
+            "note_links": [{"type": "Version", "id": version["id"]}],
+        }
+        entity = (task or {}).get("entity")
+        if entity:
+            data["note_links"].append({"type": entity["type"],
+                                       "id": entity["id"]})
+        if task and task.get("id"):
+            data["tasks"] = [{"type": "Task", "id": task["id"]}]
+        if self._owner:
+            data["user"] = {"type": self._owner["type"],
+                            "id": self._owner["id"]}
+        log.info("adding a note to Version %s", version["id"])
+        return self.sg.create("Note", data)
+
+    def create_reply(self, note_id, content):
+        data = {
+            "entity": {"type": "Note", "id": note_id},
+            "content": content,
+        }
+        if self._owner:
+            data["user"] = {"type": self._owner["type"],
+                            "id": self._owner["id"]}
+        log.info("replying to Note %s", note_id)
+        return self.sg.create("Reply", data)
+
+    def update_note(self, entity_type, entity_id, content):
+        field = "content"
+        log.info("editing %s %s", entity_type, entity_id)
+        return self.sg.update(entity_type, entity_id, {field: content})
+
+    def delete_entity(self, entity_type, entity_id):
+        log.info("deleting %s %s", entity_type, entity_id)
+        return self.sg.delete(entity_type, entity_id)
+
+    def users(self, user_ids):
+        """Author details, including the role ShotGrid itself assigns them.
+
+        One query for all the authors on screen, cached for the session: a
+        per-note lookup would be a query per row.
+        """
+        wanted = [i for i in set(user_ids or []) if i not in self._users]
+        if wanted:
+            try:
+                found = self.sg.find(
+                    "HumanUser", [["id", "in", wanted]], config.USER_FIELDS)
+            except Exception as e:
+                log.warning("could not read note authors: %s", e)
+                found = []
+            for user in found:
+                self._users[user["id"]] = user
+            for missing in wanted:
+                self._users.setdefault(missing, None)
+        return {i: self._users.get(i) for i in set(user_ids or [])}
 
     def publish_version(self, project, task, name, path, description="",
                         on_progress=None, work_file=""):

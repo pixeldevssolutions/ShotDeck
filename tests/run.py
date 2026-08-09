@@ -34,8 +34,11 @@ if "shotgun_api3" not in sys.modules:
 
 MODULES = [
     "test_media_inspector",
+    "test_path_validator",
     "test_version_query",
+    "test_preflight",
     "test_publish_service",
+    "test_notes_service",
     "test_sg_client",
     "test_ui",
 ]

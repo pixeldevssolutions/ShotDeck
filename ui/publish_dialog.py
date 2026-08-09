@@ -13,12 +13,13 @@ from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QLineEdit,
     QPushButton, QPlainTextEdit, QFileDialog, QProgressBar, QFrame,
-    QSizePolicy, QStackedWidget, QMessageBox,
+    QSizePolicy, QStackedWidget, QMessageBox, QCheckBox, QScrollArea,
 )
 
 import applog
 import config
 import media_inspector
+import path_validator
 import paths
 import publish_service
 from . import theme
@@ -104,19 +105,77 @@ class _PublishJob(QRunnable):
             self.signals.failed.emit(publish_service.friendly(e))
 
 
-class _InspectJob(QRunnable):
-    """ffprobe off the UI thread -- a cold NFS read is not instant."""
+class _CallJob(QRunnable):
+    """Run something off the UI thread -- ffprobe on a cold NFS read, or the
+    duplicate-name query, neither of which is instant."""
 
-    def __init__(self, path):
+    def __init__(self, fn):
         super().__init__()
-        self.path = path
+        self.fn = fn
         self.signals = _Signals()
 
     def run(self):
         try:
-            self.signals.done.emit(media_inspector.inspect(self.path))
+            self.signals.done.emit(self.fn())
         except Exception as e:                       # pragma: no cover
             self.signals.failed.emit(e)
+
+
+class PreflightPanel(QFrame):
+    """The checklist: what was verified, what is wrong, what is only risky."""
+
+    ICONS = {"ERROR": "✕", "WARNING": "⚠", "INFO": "✓"}
+    STYLES = {"ERROR": "checkError", "WARNING": "checkWarn",
+              "INFO": "checkOk"}
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("tile")
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(1, 1, 1, 1)
+
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QFrame.NoFrame)
+        self.host = QFrame()
+        self.lay = QVBoxLayout(self.host)
+        self.lay.setContentsMargins(12, 8, 12, 8)
+        self.lay.setSpacing(2)
+        self.lay.setAlignment(Qt.AlignTop)
+        self.scroll.setWidget(self.host)
+        outer.addWidget(self.scroll)
+        self.show_message("Choose a file to run the publish preflight.")
+
+    def _clear(self):
+        while self.lay.count():
+            item = self.lay.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+    def show_message(self, text):
+        self._clear()
+        label = QLabel(text)
+        label.setObjectName("tileSub")
+        label.setWordWrap(True)
+        self.lay.addWidget(label)
+
+    def show_report(self, report):
+        self._clear()
+        for section in report.SECTIONS:
+            findings = report.sections[section]
+            if not findings:
+                continue
+            header = QLabel(section.upper())
+            header.setObjectName("checkSection")
+            self.lay.addWidget(header)
+            for finding in findings:
+                row = QLabel(f"{self.ICONS[finding.level]}  "
+                             f"{finding.message}")
+                row.setObjectName(self.STYLES[finding.level])
+                row.setWordWrap(True)
+                if finding.detail:
+                    row.setToolTip(finding.detail)
+                self.lay.addWidget(row)
 
 
 class DropZone(QFrame):
@@ -167,10 +226,12 @@ class PublishDialog(QDialog):
         self.path = ""
         self.work_path = ""
         self.media_info = None
+        self.report = None          # last preflight
         self.published = None
         self.player = None
         self._job = None            # kept alive while it runs
-        self._inspect = None
+        self._preflight_job = None
+        self._preflight_seq = 0
         self._existing = []         # Versions already on this task
 
         self.setWindowTitle("Standalone Publish")
@@ -194,6 +255,13 @@ class PublishDialog(QDialog):
         self._name_timer.setSingleShot(True)
         self._name_timer.setInterval(config.SEARCH_DEBOUNCE_MS)
         self._name_timer.timeout.connect(self._check_name)
+
+        # The full preflight touches the disk and ShotGrid, so it is debounced
+        # too and runs off the UI thread.
+        self._preflight_timer = QTimer(self)
+        self._preflight_timer.setSingleShot(True)
+        self._preflight_timer.setInterval(config.SEARCH_DEBOUNCE_MS)
+        self._preflight_timer.timeout.connect(self._run_preflight)
 
         self._load_existing()
 
@@ -269,6 +337,8 @@ class PublishDialog(QDialog):
         fields.addWidget(_sub("Version name"))
         self.name_edit = QLineEdit()
         self.name_edit.textChanged.connect(lambda _: self._name_timer.start())
+        self.name_edit.textChanged.connect(
+            lambda _: self._preflight_timer.start())
         fields.addWidget(self.name_edit)
 
         self.name_warning = QLabel("")
@@ -294,6 +364,22 @@ class PublishDialog(QDialog):
         fields.addStretch()
         middle.addLayout(fields, 1)
         root.addLayout(middle)
+
+        self.preflight_panel = PreflightPanel()
+        self.preflight_panel.setFixedHeight(132)
+        root.addWidget(self.preflight_panel)
+
+        self.accept_warnings = QCheckBox(
+            "I understand the warnings above and want to publish anyway")
+        self.accept_warnings.setObjectName("warnText")
+        self.accept_warnings.toggled.connect(
+            lambda _: self._refresh_publish_enabled())
+        self.accept_warnings.hide()
+        root.addWidget(self.accept_warnings)
+
+        self.policy_lbl = QLabel(path_validator.describe_policy())
+        self.policy_lbl.setObjectName("tileSub")
+        root.addWidget(self.policy_lbl)
 
         self.progress = QProgressBar()
         self.progress.setRange(0, 0)        # see _set_busy for why
@@ -441,7 +527,11 @@ class PublishDialog(QDialog):
     def _on_path_typed(self, text):
         self.path = text.strip()
         self.media_info = None
+        self.report = None
+        self.accept_warnings.hide()
+        self.accept_warnings.setChecked(False)
         valid = bool(self.path) and os.path.isfile(self.path)
+        self._preflight_timer.start()
         self._refresh_publish_enabled()
 
         if not self.path:
@@ -462,26 +552,54 @@ class PublishDialog(QDialog):
             f"{os.path.basename(self.path)}\nReading media…")
         self.file_info.setToolTip(self.path)
         self._load_preview()
-        self._start_inspect()
 
-    def _start_inspect(self):
-        job = _InspectJob(self.path)
-        job.signals.done.connect(self._on_inspected)
+    # -- preflight ---------------------------------------------------------
+
+    def _run_preflight(self):
+        """Check everything, off the UI thread, before anything is created."""
+        if self.published:
+            return
+        request = self._request()
+        if not request.media_path:
+            self.report = None
+            self.preflight_panel.show_message(
+                "Choose a file to run the publish preflight.")
+            self.accept_warnings.hide()
+            self._refresh_publish_enabled()
+            return
+
+        self._preflight_seq += 1
+        sequence = self._preflight_seq
+        self.preflight_panel.show_message("Running preflight…")
+
+        job = _CallJob(lambda: self.service.preflight(request))
+        job.signals.done.connect(
+            lambda report, s=sequence: self._on_preflight(report, s))
         job.signals.failed.connect(
-            lambda e: self.file_info.setText(
-                f"{os.path.basename(self.path)}\n{e}"))
-        self._inspect = job
+            lambda e: self.preflight_panel.show_message(
+                f"Preflight could not run: {e}"))
+        self._preflight_job = job
         QThreadPool.globalInstance().start(job)
 
-    def _on_inspected(self, info):
-        if info.path != self.path:
-            return                      # a newer file was chosen meanwhile
-        self.media_info = info
-        self.file_info.setText(f"{os.path.basename(info.path)}\n"
-                               f"{info.summary()}")
-        if info.error:
-            log.info("media inspection limited for %s: %s",
-                     info.path, info.error)
+    def _on_preflight(self, report, sequence):
+        if sequence != self._preflight_seq:
+            return                      # a newer preflight already answered
+        self.report = report
+        self.media_info = report.media_info
+        self.preflight_panel.show_report(report)
+
+        if report.media_info:
+            self.file_info.setText(
+                f"{os.path.basename(report.media_info.path)}\n"
+                f"{report.media_info.summary()}")
+
+        # "Continue anyway" only exists when the policy left something as a
+        # warning. An error is not something an artist can tick past.
+        show_accept = bool(report.warnings) and report.passed
+        if not show_accept:
+            self.accept_warnings.setChecked(False)
+        self.accept_warnings.setVisible(show_accept)
+        self._refresh_publish_enabled()
 
     def _on_work_typed(self, text):
         self.work_path = text.strip()
@@ -503,8 +621,8 @@ class PublishDialog(QDialog):
         self.work_info.setToolTip(self.work_path)
 
     def _refresh_publish_enabled(self):
-        """Media must exist and be a media format; a named work file must
-        exist too; the name must not already be taken."""
+        """The preflight decides. Local checks only cover what it has not
+        looked at yet -- the work file, and the moment before the first run."""
         if self.published:
             self.publish_btn.setEnabled(False)
             return
@@ -514,6 +632,10 @@ class PublishDialog(QDialog):
             ok = False
         if self.name_warning.isVisible():
             ok = False
+        if self.report is not None:
+            ok = ok and self.report.passed
+            if self.report.warnings and not self.accept_warnings.isChecked():
+                ok = False
         self.publish_btn.setEnabled(ok)
 
     # -- preview -----------------------------------------------------------
@@ -583,20 +705,22 @@ class PublishDialog(QDialog):
 
     # -- publishing --------------------------------------------------------
 
+    def _request(self):
+        return publish_service.PublishRequest(
+            self.project, self.task, self.name_edit.text(), self.path,
+            self.desc_edit.toPlainText(), self.work_path,
+            accepted_warnings=self.accept_warnings.isChecked())
+
     def _publish(self):
         if not self._check_name():
             return
-        request = publish_service.PublishRequest(
-            self.project, self.task, self.name_edit.text(), self.path,
-            self.desc_edit.toPlainText(), self.work_path)
+        request = self._request()
 
-        # Everything the service would refuse anyway, refused here first so the
-        # artist gets the message beside the field rather than in a dialog.
-        try:
-            self.service.validate_context(self.project, self.task)
-            self.service.inspect_media(self.path)
-        except publish_service.PublishError as e:
-            self.status.setText(str(e))
+        # The service runs its own preflight regardless; this one keeps the
+        # obvious refusals beside the fields instead of after a click.
+        report = self.report
+        if report is not None and not report.passed:
+            self._on_failed(publish_service.PathRejected(report.summary()))
             return
 
         self._set_busy(True)
@@ -707,10 +831,32 @@ class _ResultPage(QFrame):
         self.note.setWordWrap(True)
         self.note.hide()
         lay.addWidget(self.note)
+
+        # A publish note while the reason is still fresh -- a real ShotGrid
+        # Note on the Version, not a comment kept somewhere local.
+        note_label = QLabel("Add publish note")
+        note_label.setObjectName("tileSub")
+        lay.addWidget(note_label)
+
+        self.note_edit = QPlainTextEdit()
+        self.note_edit.setPlaceholderText(
+            "Optional — what reviewers should know about this version")
+        self.note_edit.setFixedHeight(64)
+        lay.addWidget(self.note_edit)
+
+        self.note_status = QLabel("")
+        self.note_status.setObjectName("tileSub")
+        lay.addWidget(self.note_status)
         lay.addStretch()
 
         buttons = QHBoxLayout()
         buttons.addStretch()
+        self.post_btn = QPushButton("Post Note")
+        self.post_btn.setObjectName("consoleBtn")
+        self.post_btn.setCursor(Qt.PointingHandCursor)
+        self.post_btn.clicked.connect(self._post_note)
+        buttons.addWidget(self.post_btn)
+
         self.open_btn = QPushButton("Open Version")
         self.open_btn.setObjectName("consoleBtn")
         self.open_btn.setCursor(Qt.PointingHandCursor)
@@ -753,13 +899,47 @@ class _ResultPage(QFrame):
             self.grid.addWidget(k, r, 0, Qt.AlignRight | Qt.AlignTop)
             self.grid.addWidget(val, r, 1)
 
+        problems = []
         if result.work_file_error:
-            self.note.setText(
-                f"The Version is published, but the scene file was not "
-                f"registered: {result.work_file_error}")
+            problems.append(f"the scene file was not registered "
+                            f"({result.work_file_error})")
+        if result.note_error:
+            problems.append(f"the note was not posted ({result.note_error})")
+        if problems:
+            self.note.setText("The Version is published, but "
+                              + " and ".join(problems) + ".")
             self.note.show()
         else:
             self.note.hide()
+
+    def _post_note(self):
+        text = self.note_edit.toPlainText().strip()
+        if not text or not self.result:
+            return
+        self.post_btn.setEnabled(False)
+        self.note_status.setText("Posting note…")
+
+        job = _CallJob(lambda: self.dialog.sg.create_note(
+            self.dialog.project, self.result.version, text,
+            task=self.dialog.task))
+
+        def done(_):
+            self.note_edit.clear()
+            self.note_edit.setEnabled(False)
+            self.note_status.setText("Note posted to the Version.")
+
+        def failed(error):
+            self.post_btn.setEnabled(True)
+            log.warning("publish note not posted: %s", error)
+            self.note_status.setObjectName("errorText")
+            self.note_status.setText(f"Note not posted: {error}")
+            self.note_status.style().unpolish(self.note_status)
+            self.note_status.style().polish(self.note_status)
+
+        job.signals.done.connect(done)
+        job.signals.failed.connect(failed)
+        self._note_job = job
+        QThreadPool.globalInstance().start(job)
 
     def _open(self):
         if not self.result:

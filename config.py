@@ -125,6 +125,25 @@ VERSION_PAGE_SIZE = 100
 # How long the browser waits after a keystroke before querying ShotGrid.
 SEARCH_DEBOUNCE_MS = 300
 
+# -- notes -----------------------------------------------------------------
+#
+# ShotGrid's Note/Reply model is the whole model: a Note links to entities
+# through note_links and replies are Reply rows pointing back at it. ShotDeck
+# keeps no notes of its own.
+NOTE_FIELDS = [
+    "subject", "content", "user", "created_at", "updated_at",
+    "note_links", "tasks", "sg_status_list", "attachments",
+]
+REPLY_FIELDS = ["content", "user", "created_at", "entity"]
+
+# Read for note authors. permission_rule_set is ShotGrid's own idea of who
+# somebody is (Artist, Manager, Client, ...) -- roles are not invented here.
+USER_FIELDS = ["name", "email", "permission_rule_set", "image"]
+
+# Notes are re-read on demand, never polled. This is the shortest gap between
+# two refreshes that actually hits ShotGrid.
+NOTES_MIN_REFRESH_SECONDS = 5
+
 # Detail URL for an entity, used by "Open in ShotGrid".
 def entity_url(entity_type, entity_id):
     return f"{SG_SITE.rstrip('/')}/detail/{entity_type}/{entity_id}"
@@ -167,6 +186,42 @@ def media_filter():
 # DPX; without it the dialog falls back to Qt's image reader and file size.
 FFPROBE = os.environ.get("SHOTDECK_FFPROBE", "ffprobe")
 FFPROBE_TIMEOUT = 20
+
+# -- where media is allowed to come from -----------------------------------
+#
+# A Version whose media sits on somebody's desktop is a Version nobody else can
+# use: not the farm, not review, not the artist who picks the shot up next
+# week. The project root is derived from ENTITY_PATH_TEMPLATES above rather
+# than written out again here -- one convention, one place.
+
+# What happens to media outside the approved locations:
+#   "strict"        - refused. Nothing outside the project publishes.
+#   "approved_only" - refused unless it is under one of APPROVED_MEDIA_ROOTS.
+#   "warn"          - allowed, with a warning the artist has to acknowledge.
+# Left at "warn" because the farm's mounts have not been confirmed yet; move it
+# to "approved_only" once they have. See HANDOFF §5e.
+PATH_POLICY = os.environ.get("SHOTDECK_PATH_POLICY", "warn")
+
+# Locations outside the project that are still legitimate to publish from --
+# shared plate stores, a vendor drop, a common elements library. {project} is
+# the tank_name, {project_name} the display name. Set from the environment as
+# a colon-separated list, or edit here.
+APPROVED_MEDIA_ROOTS = [
+    p for p in os.environ.get("SHOTDECK_APPROVED_MEDIA_ROOTS", "").split(os.pathsep)
+    if p.strip()
+]
+
+# The root every project lives under, used to tell "another show" apart from
+# "not a show at all". Taken from the shared prefix of ENTITY_PATH_TEMPLATES.
+JOBS_ROOT = os.environ.get("SHOTDECK_JOBS_ROOT", "/jobs")
+
+# Directories that are always the wrong place to publish from, matched on any
+# path component. Local scratch that no render node can see.
+UNSAFE_PATH_PARTS = [
+    "desktop", "downloads", "documents",
+    "tmp", "temp", "var/tmp", "appdata", "recycle.bin",
+    "cache", "proxy_cache", ".cache", "trash",
+]
 
 # -- the optional work file ------------------------------------------------
 #

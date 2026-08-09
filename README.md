@@ -114,14 +114,75 @@ ever read from the environment.
 ### How it is put together
 
 ```
-ui/publish_dialog.py   input, preview, progress, result — no ShotGrid calls
-publish_service.py     validate, inspect, name, create, upload, clean up
-media_inspector.py     ffprobe / Qt, resolution, fps, duration, codec
+ui/publish_dialog.py   input, preview, preflight panel, progress, result
+ui/notes_panel.py      notes and activity, in the browser and after a publish
+publish_service.py     name, create, upload, clean up
+preflight.py           everything that must be true before ShotGrid is touched
+path_validator.py      is this file somewhere a publish may point at
+media_inspector.py     ffprobe / Qt: resolution, fps, duration, codec
+notes_service.py       ShotGrid Notes and Replies
 sg_client.py           the one ShotGrid client, script-authenticated
 ```
 
-`publish_service` imports no Qt, so the whole publish is testable headlessly;
-the dialog does no ShotGrid work of its own.
+None of the service modules import Qt, so the whole publish is testable
+headlessly; the dialogs do no ShotGrid work of their own.
+
+### Preflight
+
+Nothing is created until a full preflight passes. It runs twice — once as the
+artist picks a file, so the checklist is visible while it is still cheap to fix,
+and **again inside the publish service immediately before the Version is
+created**. The second run is not redundant: a dialog can sit open for an hour
+while a file is moved, overwritten or unmounted, and the client's opinion of a
+path is not a guarantee.
+
+```
+Context        project, entity, task, department
+Path           where the media lives (see below)
+Media          exists, readable, non-empty, known format, and what ffprobe
+               finds inside it — resolution, fps, frames, codec
+Version        the name is free, checked against ShotGrid
+Authentication which script is writing, and who gets the credit
+```
+
+Findings come at three levels. **ERROR** blocks the publish and cannot be ticked
+past. **WARNING** requires the artist to confirm it, and that confirmation is
+carried into the service and checked there — a caller that skips the dialog does
+not get to skip the decision. **INFO** is the checklist ticking along.
+
+An extension is not trusted on its own: if ffprobe ran and found no video track
+in a `.mov`, the file is corrupt or misnamed, and that is an error rather than a
+warning. Without ffprobe, ShotDeck says it could not check instead of guessing.
+
+### Media path policy
+
+Media that lives on somebody's desktop makes a Version nobody else can use —
+not the farm, not review, not whoever picks the shot up next week. So where a
+file comes from is checked before it is published.
+
+The project root is derived from `ENTITY_PATH_TEMPLATES` — the same templates
+the launcher uses — so there is one convention, not two. Containment is done
+with `os.path.commonpath` on normalised, symlink-resolved paths, never with
+`startswith`: `/jobs/SHOW001_backup` starts with `/jobs/SHOW001` and is a
+different show. `..`, relative paths, drive letters, case and symlinks are all
+resolved first.
+
+`config.PATH_POLICY`:
+
+| Policy | Media outside the approved locations |
+|---|---|
+| `strict` | Refused |
+| `approved_only` | Refused unless under `APPROVED_MEDIA_ROOTS` |
+| `warn` (current default) | Allowed once the artist confirms the warning |
+
+`APPROVED_MEDIA_ROOTS` covers the legitimate exceptions — a shared plate store,
+a vendor drop — and expands `{project}`. Both are environment-settable
+(`SHOTDECK_PATH_POLICY`, `SHOTDECK_APPROVED_MEDIA_ROOTS`).
+
+Two things are refused under **every** policy, because they are not preferences:
+media belonging to a **different show**, and media that fails the media checks.
+Local scratch (Desktop, Downloads, `/tmp`, cache directories — `UNSAFE_PATH_PARTS`)
+is a warning under `warn` and an error under the stricter policies.
 
 ### What it refuses to do
 
@@ -206,6 +267,32 @@ Selecting a version shows its thumbnail and the fields the site actually filled
 in — nothing is displayed as a dash. A version whose `sg_path_to_movie` exists
 on this machine can be played in place. Right-click gives Open in ShotGrid and
 Copy media path.
+
+## Notes
+
+The Version detail has **Details / Notes / Activity** tabs. Notes are ShotGrid
+`Note` and `Reply` entities — read from ShotGrid, written to ShotGrid, stored
+nowhere else. ShotGrid's model is one level of replies under a note, and that is
+what the UI draws rather than inventing nesting ShotGrid cannot keep.
+
+Each message shows its author, the author's ShotGrid **permission rule set**
+(Artist, Manager, Client — ShotGrid's own idea of who they are, not a role
+ShotDeck made up), the time, and the text. Edit and Delete appear only on your
+own messages; ShotGrid's permissions are still the real gate, this just keeps
+buttons that are certain to fail off the screen.
+
+Notes are read on demand, never polled: **↻ Refresh Notes** reloads the notes
+for the selected version and leaves the version list, filters and selection
+alone. A short cooldown stops a leaning-on-the-button refresh storm.
+
+The publish result page has an **Add publish note** box, so the reason for a
+version gets recorded while it is still fresh — as a real Note on the Version.
+
+## Activity
+
+The Activity tab merges the notes, the replies and the Version's own creation
+into one timeline, newest first. Only events ShotGrid actually recorded; nothing
+is synthesised to pad it out.
 
 ## Tests
 

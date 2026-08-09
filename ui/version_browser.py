@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QLineEdit,
     QComboBox, QPushButton, QTableWidget, QTableWidgetItem, QHeaderView,
     QAbstractItemView, QFrame, QStackedWidget, QSplitter, QMenu, QApplication,
-    QMessageBox, QSizePolicy,
+    QMessageBox, QSizePolicy, QTabWidget, QWidget,
 )
 
 import applog
@@ -23,6 +23,7 @@ import config
 import paths
 import version_query
 from . import jobs, theme
+from .notes_panel import NotesPanel, ActivityPanel
 from .widgets import EmptyState, StatusPill, load_thumbnail
 
 log = applog.get()
@@ -257,12 +258,29 @@ class VersionBrowser(QDialog):
 
         right = QVBoxLayout()
         right.setSpacing(8)
+
+        # Details, notes and activity share the space rather than fighting for
+        # it: the same tab pattern the main window already uses.
+        self.tabs = QTabWidget()
+        details_page = QWidget()
+        details_lay = QVBoxLayout(details_page)
+        details_lay.setContentsMargins(0, 8, 0, 0)
         self.details = QGridLayout()
         self.details.setHorizontalSpacing(18)
         self.details.setVerticalSpacing(4)
         self.details.setColumnStretch(1, 1)
-        right.addLayout(self.details)
-        right.addStretch()
+        details_lay.addLayout(self.details)
+        details_lay.addStretch()
+        self.tabs.addTab(details_page, "Details")
+
+        self.notes = NotesPanel(self.sg, self.project, self.task)
+        self.tabs.addTab(self.notes, "Notes")
+
+        self.activity = ActivityPanel()
+        self.tabs.addTab(self.activity, "Activity")
+        self.notes.posted.connect(self._refresh_activity)
+        self.notes.loaded.connect(self._refresh_activity)
+        right.addWidget(self.tabs, 1)
 
         actions = QHBoxLayout()
         actions.addStretch()
@@ -431,10 +449,25 @@ class VersionBrowser(QDialog):
     def _on_selected(self):
         version = self._selected()
         self.open_btn.setEnabled(bool(version))
+        self.notes.set_version(version)
         if not version:
+            self.activity.show_events([])
             return
         self._show_details(version)
         self._show_preview(version)
+        self._refresh_activity()
+
+    def _refresh_activity(self):
+        """Rebuild the timeline from whatever notes are already loaded.
+
+        No extra query: the notes panel has just fetched them, and the
+        Version's own creation is already on the row.
+        """
+        version = self._selected()
+        if not version:
+            return
+        self.activity.show_events(
+            self.notes.service.activity(version, self.notes.threads))
 
     def _show_details(self, version):
         while self.details.count():

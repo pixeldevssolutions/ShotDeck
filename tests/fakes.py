@@ -24,7 +24,19 @@ TASK = {
 TASK_NO_ENTITY = dict(TASK, id=7632, entity=None)
 
 ARTIST = {"type": "HumanUser", "id": 42, "name": "Jitesh",
-          "email": "jitesh@5and8.ai"}
+          "email": "jitesh@5and8.ai",
+          "permission_rule_set": {"type": "PermissionRuleSet", "id": 1,
+                                  "name": "Artist"}}
+
+PRODUCER = {"type": "HumanUser", "id": 43, "name": "Rahul",
+            "email": "rahul@5and8.ai",
+            "permission_rule_set": {"type": "PermissionRuleSet", "id": 2,
+                                    "name": "Manager"}}
+
+CLIENT = {"type": "HumanUser", "id": 44, "name": "Sam",
+          "email": "sam@client.example",
+          "permission_rule_set": {"type": "PermissionRuleSet", "id": 3,
+                                  "name": "Client"}}
 
 
 class FakeShotgun:
@@ -33,6 +45,9 @@ class FakeShotgun:
     def __init__(self, versions=None):
         self.calls = []
         self.versions = list(versions or [])
+        self.notes = []
+        self.replies = []
+        self.users = [ARTIST, PRODUCER, CLIENT]
         self.published_files = []
         self.uploads = []
         self.deleted = []
@@ -62,6 +77,28 @@ class FakeShotgun:
         self.versions.append(version)
         return version
 
+    def add_note(self, version_id, content, user=None, subject=""):
+        note = {
+            "type": "Note", "id": self._new_id(), "content": content,
+            "subject": subject, "user": user or CLIENT,
+            "created_at": datetime.datetime(2026, 8, 9, 16, 32)
+            + datetime.timedelta(minutes=len(self.notes)),
+            "note_links": [{"type": "Version", "id": version_id}],
+        }
+        self.notes.append(note)
+        return note
+
+    def add_reply(self, note_id, content, user=None):
+        reply = {
+            "type": "Reply", "id": self._new_id(), "content": content,
+            "user": user or ARTIST,
+            "created_at": datetime.datetime(2026, 8, 9, 17, 2)
+            + datetime.timedelta(minutes=len(self.replies)),
+            "entity": {"type": "Note", "id": note_id},
+        }
+        self.replies.append(reply)
+        return reply
+
     def _new_id(self):
         self._next_id += 1
         return self._next_id
@@ -83,6 +120,13 @@ class FakeShotgun:
                 start = (page - 1) * limit
                 rows = rows[start:start + limit]
             return rows
+        if entity_type == "Note":
+            return [n for n in self.notes if _matches(n, filters)]
+        if entity_type == "Reply":
+            return [r for r in self.replies if _matches(r, filters)]
+        if entity_type == "HumanUser":
+            wanted = next((f[2] for f in filters if f[0] == "id"), [])
+            return [u for u in self.users if u["id"] in wanted]
         if entity_type == "Step":
             return [{"type": "Step", "id": 9, "code": "Comp",
                      "entity_type": "Shot"},
@@ -107,13 +151,19 @@ class FakeShotgun:
             self.versions.append(row)
         if entity_type == "PublishedFile":
             self.published_files.append(row)
+        if entity_type == "Note":
+            row.setdefault("created_at", datetime.datetime.now())
+            self.notes.append(row)
+        if entity_type == "Reply":
+            row.setdefault("created_at", datetime.datetime.now())
+            self.replies.append(row)
         return row
 
     def update(self, entity_type, entity_id, data):
         self.calls.append(("update", entity_type, entity_id, data))
-        for v in self.versions:
-            if v["id"] == entity_id:
-                v.update(data)
+        for row in self.versions + self.notes + self.replies:
+            if row["id"] == entity_id and row["type"] == entity_type:
+                row.update(data)
         return {"type": entity_type, "id": entity_id, **data}
 
     def delete(self, entity_type, entity_id):
@@ -122,6 +172,8 @@ class FakeShotgun:
             raise self.fail_delete
         self.deleted.append((entity_type, entity_id))
         self.versions = [v for v in self.versions if v["id"] != entity_id]
+        self.notes = [n for n in self.notes if n["id"] != entity_id]
+        self.replies = [r for r in self.replies if r["id"] != entity_id]
         return True
 
     def upload(self, entity_type, entity_id, path, field_name=None, **kwargs):
@@ -156,9 +208,23 @@ def _matches(version, filters):
         actual = _deep_get(version, field)
         if op == "is":
             if isinstance(value, dict):
-                if not actual or actual.get("id") != value["id"]:
+                if isinstance(actual, list):
+                    # note_links and friends: a link matches if it is in there
+                    if not any(a.get("id") == value["id"] and
+                               a.get("type") == value["type"]
+                               for a in actual):
+                        return False
+                elif not actual or actual.get("id") != value["id"]:
                     return False
             elif actual != value:
+                return False
+        elif op == "in":
+            wanted = value if isinstance(value, list) else [value]
+            if isinstance(actual, dict):
+                if not any(isinstance(w, dict) and w.get("id") == actual["id"]
+                           for w in wanted):
+                    return False
+            elif actual not in wanted:
                 return False
         elif op == "contains":
             haystack = actual if isinstance(actual, str) else \

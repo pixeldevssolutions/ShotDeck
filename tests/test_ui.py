@@ -138,17 +138,64 @@ def test_duplicate_name_warns_and_blocks_before_any_upload():
 
 def test_media_is_inspected_off_the_ui_thread():
     dialog = _dialog()
-    dialog.file_edit.setText(PNG)
-    settle()
+    _choose(dialog, PNG)
     assert dialog.media_info is not None
     assert "400 × 225" in dialog.file_info.text()
+
+
+def test_preflight_reports_before_anything_is_created():
+    sg = fakes.FakeShotgun()
+    dialog = _dialog(sg)
+    _choose(dialog, PNG)
+    assert dialog.report is not None
+    assert not any(c[0] == "create" for c in sg.calls), \
+        "the preflight must not create anything"
+    text = _labels(dialog.preflight_panel)
+    assert "Project: UAT6" in text
+    assert "Version name available" in text
+
+
+def test_a_warning_must_be_accepted_before_publish_is_offered():
+    """The fixtures live in the OS temp directory, which is exactly the case
+    the path policy exists for."""
+    dialog = _dialog()
+    dialog.file_edit.setText(PNG)
+    dialog._run_preflight()
+    settle()
+    assert dialog.report.warnings
+    assert dialog.accept_warnings.isVisible()
+    assert not dialog.publish_btn.isEnabled(), \
+        "a warning must not be publishable until it is acknowledged"
+
+    dialog.accept_warnings.setChecked(True)
+    assert dialog.publish_btn.isEnabled()
+
+
+def test_an_error_cannot_be_ticked_past():
+    dialog = _dialog()
+    txt = os.path.join(TMP, "notes.txt")
+    open(txt, "w").write("hello")
+    dialog.file_edit.setText(txt)
+    dialog._run_preflight()
+    settle()
+    assert not dialog.report.passed
+    assert not dialog.accept_warnings.isVisible(), \
+        "there is no continuing past an error"
+    assert not dialog.publish_btn.isEnabled()
+
+
+def test_media_from_another_project_is_refused_in_the_dialog():
+    dialog = _dialog()
+    dialog.file_edit.setText("/jobs/SHOW002/renders/v001.mov")
+    dialog._run_preflight()
+    settle()
+    assert not dialog.publish_btn.isEnabled()
 
 
 def test_publish_shows_a_result_with_the_api_identity():
     sg = fakes.FakeShotgun()
     dialog = _dialog(sg)
-    dialog.file_edit.setText(PNG)
-    settle()
+    _choose(dialog, PNG)
     dialog._publish()
     settle()
 
@@ -321,6 +368,105 @@ def test_browser_empty_state_when_nothing_matches():
     assert browser.count_lbl.text() in ("", "0 versions")
 
 
+# -- notes in the browser --------------------------------------------------
+
+def _browser_with_notes():
+    sg = fakes.FakeShotgun()
+    version = sg.add_version("SH010_Comp_v004")
+    note = sg.add_note(version["id"], "Reduce brightness.",
+                       user=fakes.CLIENT)
+    sg.add_reply(note["id"], "Can Comp investigate?", user=fakes.PRODUCER)
+    sg.add_reply(note["id"], "Updated in v005.", user=fakes.ARTIST)
+    browser = _browser(sg)
+    browser.tabs.setCurrentIndex(1)          # Notes
+    browser.table.selectRow(0)
+    settle()
+    return sg, browser
+
+
+def test_notes_show_for_the_selected_version_with_their_authors():
+    sg, browser = _browser_with_notes()
+    text = _labels(browser.notes)
+    assert "Reduce brightness." in text
+    assert "Sam" in text and "CLIENT" in text
+    assert "Can Comp investigate?" in text
+    assert "Updated in v005." in text
+
+
+def test_replies_are_drawn_under_their_note():
+    from ui.notes_panel import MessageCard
+
+    sg, browser = _browser_with_notes()
+    cards = browser.notes.findChildren(MessageCard)
+    kinds = [c.message.kind for c in cards]
+    assert kinds == ["note", "reply", "reply"]
+    assert all(c.message.depth == 1 for c in cards if c.message.kind == "reply")
+
+
+def test_edit_and_delete_only_appear_on_your_own_messages():
+    from PySide6.QtWidgets import QPushButton
+    from ui.notes_panel import MessageCard
+
+    sg, browser = _browser_with_notes()
+    cards = browser.notes.findChildren(MessageCard)
+    buttons = {c.message.author_name:
+               [b.text() for b in c.findChildren(QPushButton)]
+               for c in cards}
+    assert "Delete" not in buttons["Sam"], "the client's note is not ours"
+    assert "Delete" in buttons["Jitesh"], "our own reply is"
+
+
+def test_posting_a_note_writes_to_shotgrid_and_reloads_notes_only():
+    sg, browser = _browser_with_notes()
+    version_queries = len([c for c in sg.calls
+                           if c[0] == "find" and c[1] == "Version"])
+
+    browser.notes.compose.setPlainText("Grade updated.")
+    browser.notes._post()
+    settle()
+
+    created = [c for c in sg.calls if c[0] == "create" and c[1] == "Note"]
+    assert created and created[0][2]["content"] == "Grade updated."
+    assert "Grade updated." in _labels(browser.notes)
+    assert len([c for c in sg.calls
+                if c[0] == "find" and c[1] == "Version"]) == version_queries, \
+        "refreshing notes must not re-query the version list"
+
+
+def test_replying_from_the_card_creates_a_reply():
+    sg, browser = _browser_with_notes()
+    thread = browser.notes.threads[0]
+    browser.notes._start_reply(thread)
+    browser.notes.compose.setPlainText("On it.")
+    browser.notes._post()
+    settle()
+    assert sg.replies[-1]["content"] == "On it."
+    assert sg.replies[-1]["entity"]["id"] == thread.id
+
+
+def test_the_activity_tab_merges_notes_and_the_publish():
+    sg, browser = _browser_with_notes()
+    browser.tabs.setCurrentIndex(2)          # Activity
+    settle()
+    text = _labels(browser.activity)
+    assert "published SH010_Comp_v004" in text
+    assert "wrote:" in text and "replied:" in text
+
+
+def test_notes_failure_is_reported_in_place():
+    sg = fakes.FakeShotgun()
+    sg.add_version("SH010_Comp_v004")
+    browser = _browser(sg)
+    browser.table.selectRow(0)
+    settle()
+
+    sg.fail_find = RuntimeError("Permission denied on Note")
+    browser.notes._cooldown.stop()
+    browser.notes.refresh()
+    settle()
+    assert "Notes unavailable" in browser.notes.status.text()
+
+
 # -- helpers ---------------------------------------------------------------
 
 def _drop(widget, paths):
@@ -333,6 +479,17 @@ def _drop(widget, paths):
                                      Qt.CopyAction, mime, Qt.LeftButton,
                                      Qt.NoModifier))
     app.processEvents()
+
+
+def _choose(dialog, path):
+    """Pick a file, run the preflight now rather than after the debounce, and
+    accept the temp-directory warning the fixtures inevitably raise."""
+    dialog.file_edit.setText(path)
+    dialog._run_preflight()
+    settle()
+    if dialog.accept_warnings.isVisible():
+        dialog.accept_warnings.setChecked(True)
+    return dialog.report
 
 
 def _same(a, b):
