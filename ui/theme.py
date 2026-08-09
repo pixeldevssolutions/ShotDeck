@@ -175,6 +175,35 @@ QStatusBar::item {{ border: none; }}
     selection-background-color: {ACCENT_SUNK};
 }}
 
+/* ---- combo boxes ---- */
+QComboBox {{
+    background: {SURFACE_SUNK}; border: 1px solid {BORDER};
+    border-radius: {RADIUS_SM}px; padding: 5px 10px; color: {TEXT_DIM};
+    min-height: 18px;
+}}
+QComboBox:hover {{ border-color: {BORDER_HI}; color: {TEXT}; }}
+QComboBox::drop-down {{ border: none; width: 18px; }}
+QComboBox::down-arrow {{ image: none; }}
+QComboBox QAbstractItemView {{
+    background: {SURFACE_HI}; border: 1px solid {BORDER_HI};
+    selection-background-color: {ACCENT_SUNK}; color: {TEXT};
+    outline: none; padding: 4px;
+}}
+#filterLabel {{ color: {TEXT_FAINT}; font-size: 11px; }}
+#warnText {{ color: {WARN}; font-size: 12px; }}
+#errorText {{ color: {ERROR}; font-size: 12px; }}
+
+/* ---- drop zone ---- */
+#dropZone {{
+    background: {SURFACE}; border: 1px dashed {BORDER_HI};
+    border-radius: {RADIUS}px;
+}}
+#dropZoneActive {{
+    background: rgba(61,157,255,0.10); border: 1px dashed {ACCENT};
+    border-radius: {RADIUS}px;
+}}
+#dropHint {{ color: {TEXT_FAINT}; font-size: 12px; }}
+
 /* ---- empty states ---- */
 #emptyIcon {{ color: {BORDER_HI}; font-size: 34px; }}
 #emptyTitle {{ color: {TEXT_DIM}; font-size: 14px; font-weight: 600; }}

@@ -1,38 +1,22 @@
 import getpass
 
-from PySide6.QtCore import Qt, QThreadPool, QRunnable, QObject, Signal
+from PySide6.QtCore import Qt, QThreadPool
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QStackedWidget, QMessageBox, QSplitter, QDialog,
+    QPushButton, QStackedWidget, QMessageBox, QSplitter,
 )
 
 import applog, config, launcher, paths
+from . import jobs
 from .widgets import STYLE, Avatar
 from .console import ConsolePanel
 from .project_page import ProjectPage
 from .publish_dialog import PublishDialog
 from .software_page import SoftwarePage
+from .version_browser import VersionBrowser
 
 log = applog.get()
-
-
-class _WorkerSignals(QObject):
-    result = Signal(object)
-    error = Signal(str)
-
-
-class _Worker(QRunnable):
-    def __init__(self, fn, *args):
-        super().__init__()
-        self.fn, self.args = fn, args
-        self.signals = _WorkerSignals()
-
-    def run(self):
-        try:
-            self.signals.result.emit(self.fn(*self.args))
-        except Exception as e:
-            self.signals.error.emit(str(e))
 
 
 class MainWindow(QMainWindow):
@@ -140,6 +124,7 @@ class MainWindow(QMainWindow):
         self.software_page.folder_requested.connect(self.open_folder)
         self.software_page.status_change_requested.connect(self.set_task_status)
         self.software_page.publish_requested.connect(self.publish_version)
+        self.software_page.versions_requested.connect(self.view_versions)
 
         self.statusBar().showMessage("Connecting to ShotGrid...")
         self._run(self._bootstrap, self._on_bootstrap)
@@ -163,25 +148,11 @@ class MainWindow(QMainWindow):
     # -- async helper ------------------------------------------------------
 
     def _run(self, fn, on_result, *args, on_error=None):
-        """Run fn on the thread pool and hand the result back on the UI thread.
-
-        The worker is kept in _jobs until it finishes: QThreadPool takes the
-        C++ object, but nothing holds the Python side, and a collected wrapper
-        takes its signals with it — the callbacks then never fire.
-        """
-        worker = _Worker(fn, *args)
-        self._jobs.add(worker)
-
-        def finished(*_):
-            self._jobs.discard(worker)
-
-        worker.signals.result.connect(on_result)
-        worker.signals.result.connect(finished)
-        worker.signals.error.connect(
-            on_error or
+        """Run fn on the thread pool and hand the result back on the UI thread."""
+        return jobs.run(
+            self._jobs, fn, on_result, *args, pool=self.pool,
+            on_error=on_error or
             (lambda msg: QMessageBox.critical(self, "ShotGrid", msg)))
-        worker.signals.error.connect(finished)
-        self.pool.start(worker)
 
     # -- data --------------------------------------------------------------
 
@@ -285,12 +256,27 @@ class MainWindow(QMainWindow):
                  task["id"], task.get("content", ""))
 
         dialog = PublishDialog(self.sg, self.project, task, self.email, self)
-        if dialog.exec() == QDialog.Accepted:
-            version = getattr(dialog, "published", None)
-            if version:
-                self.statusBar().showMessage(
-                    f"Published Version {version.get('code') or version['id']} "
-                    f"to '{task.get('content', '')}'")
+        dialog.exec()
+        result = dialog.published
+        if result:
+            self.statusBar().showMessage(
+                f"Published Version {result.code} to "
+                f"'{task.get('content', '')}' as {self.sg.api_identity}")
+
+    def view_versions(self, task):
+        """Browse what has already been published on this task's entity."""
+        self.task = task
+        self.software_page.set_task(task)
+        if not task.get("entity"):
+            QMessageBox.information(
+                self, "Versions",
+                "This task is not linked to a shot or asset, so it has no "
+                "versions to browse.")
+            return
+        log.info("version browser for %s %s (task %s)",
+                 task["entity"].get("type"), task["entity"].get("name"),
+                 task["id"])
+        VersionBrowser(self.sg, self.project, task, self).exec()
 
     def set_task_status(self, task, code):
         """Write a status change back to ShotGrid, off the UI thread."""

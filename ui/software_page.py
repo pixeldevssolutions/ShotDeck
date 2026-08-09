@@ -94,8 +94,9 @@ class TasksTable(QWidget):
     task_selected = Signal(object)          # the Task dict, or None
     package_launched = Signal(object, str, str)   # task, package, version
     folder_requested = Signal(str)                # absolute path to open
-    status_change_requested = Signal(object, str)
-    publish_requested = Signal(object)  # task, new status code
+    status_change_requested = Signal(object, str)   # task, new status code
+    publish_requested = Signal(object)              # task
+    versions_requested = Signal(object)             # task
 
     def __init__(self):
         super().__init__()
@@ -199,6 +200,7 @@ class TasksTable(QWidget):
         menu.addSeparator()
 
         self._add_publish_actions(menu, task)
+        self._add_version_actions(menu, task)
         menu.addSeparator()
 
         self._add_status_actions(menu, task)
@@ -242,6 +244,19 @@ class TasksTable(QWidget):
                        "without opening a DCC")
         act.triggered.connect(
             lambda _=False, t=task: self.publish_requested.emit(t))
+        sub.addAction(act)
+        return sub
+
+    def _add_version_actions(self, menu, task):
+        """Versions submenu, built with an explicit parent like the others."""
+        sub = QMenu("Versions", menu)
+        menu.addMenu(sub)
+        act = QAction("View Versions…", sub)
+        act.setToolTip("Browse the versions already published on this shot "
+                       "or asset")
+        act.triggered.connect(
+            lambda _=False, t=task: self.versions_requested.emit(t))
+        act.setEnabled(bool(task.get("entity")))
         sub.addAction(act)
         return sub
 
@@ -355,6 +370,7 @@ class SoftwarePage(QWidget):
     folder_requested = Signal(str)
     status_change_requested = Signal(object, str)
     publish_requested = Signal(object)
+    versions_requested = Signal(object)
 
     def __init__(self):
         super().__init__()
@@ -383,6 +399,7 @@ class SoftwarePage(QWidget):
         self.tasks.folder_requested.connect(self.folder_requested)
         self.tasks.status_change_requested.connect(self.status_change_requested)
         self.tasks.publish_requested.connect(self.publish_requested)
+        self.tasks.versions_requested.connect(self.versions_requested)
 
     def set_project(self, project):
         self.tasks.set_project(project)

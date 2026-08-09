@@ -40,6 +40,38 @@ class _ThumbJob(QRunnable):
             pass    # a missing thumbnail is not worth bothering anyone about
 
 
+_thumb_jobs = set()          # see ui/jobs.py for why these are held
+
+
+def load_thumbnail(url, callback):
+    """Call `callback(QPixmap)` with the image at `url`, cached per URL.
+
+    Shared by the tiles and the Version browser so a thumbnail already seen in
+    one is never fetched again for the other.
+    """
+    if not url:
+        return
+    data = _thumb_cache.get(url)
+    if data is not None:
+        pm = QPixmap()
+        pm.loadFromData(data)
+        callback(pm)
+        return
+
+    job = _ThumbJob(url)
+    _thumb_jobs.add(job)
+
+    def done(u, raw):
+        _thumb_cache[u] = raw
+        _thumb_jobs.discard(job)
+        pm = QPixmap()
+        pm.loadFromData(raw)
+        callback(pm)
+
+    job.signals.done.connect(done)
+    _pool.start(job)
+
+
 def rounded(pixmap, size, radius):
     """Scale to fill, centre-crop, and round the corners."""
     scaled = pixmap.scaled(size, Qt.KeepAspectRatioByExpanding,
