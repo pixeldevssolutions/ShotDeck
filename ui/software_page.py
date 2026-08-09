@@ -89,11 +89,15 @@ class SoftwareGrid(QWidget):
 
 
 class TasksTable(QWidget):
-    COLS = ["Task", "Link", "Step", "Status", "Due"]
+    COLS = ["Task", "Link", "Step", "Status", "Latest Version", "Due"]
+    COL_STATUS = 3
+    COL_LATEST = 4
+    COL_DUE = 5
 
     task_selected = Signal(object)          # the Task dict, or None
     package_launched = Signal(object, str, str)   # task, package, version
     folder_requested = Signal(str)                # absolute path to open
+    latest_version_requested = Signal(object, object)   # task, version
     status_change_requested = Signal(object, str)   # task, new status code
     publish_requested = Signal(object)              # task
     versions_requested = Signal(object)             # task
@@ -105,6 +109,8 @@ class TasksTable(QWidget):
         self._packages = []          # [(package, [versions]), ...] from disk
         self._project = None         # needed to build folder paths
         self._statuses = []          # [(code, label), ...] from the SG schema
+        self._latest = {}            # task id -> newest Version, one query
+        self._attention = {}         # task id -> why it needs attention
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(24, 16, 24, 16)
@@ -137,10 +143,12 @@ class TasksTable(QWidget):
         header.setSectionResizeMode(0, QHeaderView.Stretch)          # Task
         header.setSectionResizeMode(1, QHeaderView.ResizeToContents) # Link
         header.setSectionResizeMode(2, QHeaderView.ResizeToContents) # Step
-        header.setSectionResizeMode(3, QHeaderView.Fixed)            # Status
-        header.setSectionResizeMode(4, QHeaderView.Fixed)            # Due
-        header.resizeSection(3, 110)
-        header.resizeSection(4, 110)
+        header.setSectionResizeMode(self.COL_STATUS, QHeaderView.Fixed)
+        header.setSectionResizeMode(self.COL_LATEST, QHeaderView.Fixed)
+        header.setSectionResizeMode(self.COL_DUE, QHeaderView.Fixed)
+        header.resizeSection(self.COL_STATUS, 110)
+        header.resizeSection(self.COL_LATEST, 150)
+        header.resizeSection(self.COL_DUE, 110)
         header.setHighlightSections(False)
         self.table.verticalHeader().hide()
         self.table.verticalHeader().setDefaultSectionSize(38)
@@ -150,8 +158,9 @@ class TasksTable(QWidget):
         self.table.setSelectionMode(QTableWidget.SingleSelection)
         self.table.setMouseTracking(True)      # so ::item:hover works
         self.table.setFocusPolicy(Qt.NoFocus)  # no dotted focus rectangle
-        self.table.setItemDelegateForColumn(3, StatusPill(self.table))
-        self.table.setItemDelegateForColumn(4, DueDate(self.table))
+        self.table.setItemDelegateForColumn(self.COL_STATUS,
+                                            StatusPill(self.table))
+        self.table.setItemDelegateForColumn(self.COL_DUE, DueDate(self.table))
         self.table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
         self.table.itemSelectionChanged.connect(self._on_selection)
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -200,6 +209,7 @@ class TasksTable(QWidget):
         menu.addSeparator()
 
         self._add_publish_actions(menu, task)
+        self._add_latest_version_actions(menu, task)
         self._add_version_actions(menu, task)
         menu.addSeparator()
 
@@ -285,6 +295,40 @@ class TasksTable(QWidget):
     def set_statuses(self, statuses):
         self._statuses = statuses or []
 
+    def set_latest_versions(self, latest):
+        """{task id: newest Version}, from one batched query upstream."""
+        self._latest = latest or {}
+        self._rebuild()
+
+    def set_attention(self, reasons):
+        """{task id: why this task needs looking at}, from the review inbox."""
+        self._attention = reasons or {}
+        self._rebuild()
+
+    def latest_for(self, task):
+        return self._latest.get(task["id"]) if task else None
+
+    def _add_latest_version_actions(self, menu, task):
+        sub = QMenu("Latest Version", menu)
+        menu.addMenu(sub)
+        latest = self._latest.get(task["id"])
+        if not latest:
+            act = QAction("No Versions", sub)
+            act.setEnabled(False)
+            act.setToolTip("Nothing has been published against this task yet")
+            sub.addAction(act)
+            return sub
+
+        act = QAction(f"Open {latest.get('code') or 'latest version'}", sub)
+        reason = self._attention.get(task["id"])
+        if reason:
+            act.setToolTip(reason)
+        act.triggered.connect(
+            lambda _=False, t=task, v=latest:
+            self.latest_version_requested.emit(t, v))
+        sub.addAction(act)
+        return sub
+
     def update_task(self, task_id, code):
         """Reflect a status write without refetching the whole task list."""
         for t in self._tasks:
@@ -334,9 +378,16 @@ class TasksTable(QWidget):
         for t in self._tasks:
             entity = (t.get("entity") or {}).get("name", "")
             step = (t.get("step") or {}).get("name", "")
+            latest = self._latest.get(t["id"])
+            attention = self._attention.get(t["id"])
+            # A dot only where there is something to look at, and the tooltip
+            # says what: a bare notification dot tells an artist nothing.
+            latest_text = (f"{latest.get('code') or ''}"
+                           f"{'  ●' if attention else ''}") if latest else ""
             row_vals = [
                 t.get("content", ""), entity, step,
-                t.get("sg_status_list", ""), t.get("due_date") or "",
+                t.get("sg_status_list", ""), latest_text,
+                t.get("due_date") or "",
             ]
             if text and not any(text in str(v).lower() for v in row_vals):
                 continue
@@ -350,6 +401,15 @@ class TasksTable(QWidget):
                     item.setForeground(QColor(theme.TEXT))
                 elif c == 2:
                     item.setForeground(QColor(theme.TEXT_DIM))
+                elif c == self.COL_LATEST:
+                    item.setForeground(QColor(
+                        theme.WARN if attention else theme.TEXT_DIM))
+                    if attention:
+                        item.setToolTip(attention)
+                    elif latest:
+                        item.setToolTip(
+                            f"{latest.get('code')} · "
+                            f"{latest.get('sg_status_list') or ''}")
                 self.table.setItem(r, c, item)
 
         self.table.setUpdatesEnabled(True)
@@ -371,6 +431,7 @@ class SoftwarePage(QWidget):
     status_change_requested = Signal(object, str)
     publish_requested = Signal(object)
     versions_requested = Signal(object)
+    latest_version_requested = Signal(object, object)
 
     def __init__(self):
         super().__init__()
@@ -400,12 +461,20 @@ class SoftwarePage(QWidget):
         self.tasks.status_change_requested.connect(self.status_change_requested)
         self.tasks.publish_requested.connect(self.publish_requested)
         self.tasks.versions_requested.connect(self.versions_requested)
+        self.tasks.latest_version_requested.connect(
+            self.latest_version_requested)
 
     def set_project(self, project):
         self.tasks.set_project(project)
 
     def set_statuses(self, statuses):
         self.tasks.set_statuses(statuses)
+
+    def set_latest_versions(self, latest):
+        self.tasks.set_latest_versions(latest)
+
+    def set_attention(self, reasons):
+        self.tasks.set_attention(reasons)
 
     def update_task_status(self, task_id, code):
         self.tasks.update_task(task_id, code)

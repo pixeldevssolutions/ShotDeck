@@ -122,6 +122,18 @@ VERSION_OPTIONAL_FIELDS = []
 # Versions fetched per page in the browser. The rest arrive on Load more.
 VERSION_PAGE_SIZE = 100
 
+# What "latest" means. ShotGrid's own timestamp, not the name: v010, v011, v002
+# is a real publishing order and max(name) gets it wrong. Set to "code" only if
+# a studio genuinely numbers versions in publish order.
+LATEST_VERSION_FIELD = os.environ.get("SHOTDECK_LATEST_VERSION_FIELD",
+                                      "created_at")
+
+# Fields read for the Latest Version column. Deliberately small: this is one
+# query across every task on the page.
+LATEST_VERSION_FIELDS = [
+    "code", "created_at", "sg_status_list", "sg_task", "entity", "user",
+]
+
 # How long the browser waits after a keystroke before querying ShotGrid.
 SEARCH_DEBOUNCE_MS = 300
 
@@ -143,6 +155,30 @@ USER_FIELDS = ["name", "email", "permission_rule_set", "image"]
 # Notes are re-read on demand, never polled. This is the shortest gap between
 # two refreshes that actually hits ShotGrid.
 NOTES_MIN_REFRESH_SECONDS = 5
+
+# -- the review inbox ------------------------------------------------------
+
+# How far back "needs attention" looks. Everything older has been dealt with
+# or has been overtaken by a newer version.
+REVIEW_WINDOW_DAYS = int(os.environ.get("SHOTDECK_REVIEW_DAYS", "30"))
+
+# Version statuses that mean somebody is waiting on the artist. Short codes,
+# because that is what the site stores -- check them against the site's own
+# status list before trusting this map (see HANDOFF).
+# Deliberately NOT "rev": that is the status a fresh publish gets
+# (VERSION_STATUS above), so treating it as an action item would mark every
+# version the artist just published as needing their attention.
+REVIEW_STATUS_TYPES = {
+    "rej": "VERSION_REJECTED",
+    "rrq": "REVISION_REQUESTED",
+    "vwd": "REVISION_REQUESTED",     # "viewed, changes wanted" on some sites
+}
+
+# Which items have been looked at. Ids and timestamps, nothing else: ShotGrid
+# has no per-user read flag ShotDeck is allowed to write.
+REVIEW_READ_STATE_PATH = os.environ.get(
+    "SHOTDECK_REVIEW_STATE",
+    os.path.expanduser("~/.shotdeck/review_read.json"))
 
 # Detail URL for an entity, used by "Open in ShotGrid".
 def entity_url(entity_type, entity_id):

@@ -294,6 +294,70 @@ The Activity tab merges the notes, the replies and the Version's own creation
 into one timeline, newest first. Only events ShotGrid actually recorded; nothing
 is synthesised to pad it out.
 
+## Version compare
+
+From the Version browser: **Compare…**, or right-click a version →
+**Compare ▸ With previous / With latest / Compare With…**. Any two versions, not
+just neighbours. From Needs Attention, **Compare with previous** goes straight
+from a note to what changed.
+
+Four modes: **Side by Side**, **A/B**, **Wipe** (draggable divider), and
+**Difference**. Difference is offered only where it means something — two stills
+of the same resolution — and says why when it is not, rather than showing a black
+frame. It uses Qt's own Difference composition; a per-pixel loop over two 2K
+frames would freeze the window.
+
+Zoom, fit and actual size apply to both sides at once, so the images stay
+comparable. Differing resolutions are printed side by side and the differing
+metadata rows are highlighted — nothing is silently rescaled.
+
+Movies use the A/B workflow. Frame-accurate synchronised playback is not
+something Qt Multimedia can be relied on for here, and a fragile custom player
+would be worse than an honest A/B switch.
+
+Notes for **both** versions are listed under the media, each labelled with the
+version it belongs to — the point of a compare is to see what changed *and* the
+feedback that caused it. **Publish New Version** from the browser reuses the same
+publish dialog and service, with the task context already filled in.
+
+## Latest version on tasks
+
+The My Tasks table has a **Latest Version** column, filled by a single batched
+query for the whole page — never one query per task. "Latest" is ShotGrid's
+timestamp, not the version name: `v010, v011, v002` is a real publishing order
+and `max(name)` reads it backwards. `config.LATEST_VERSION_FIELD` makes the rule
+configurable for a studio that genuinely numbers in publish order.
+
+Right-click a task → **Latest Version ▸ Open Latest Version** opens the browser
+with that version already selected. A task with nothing published says
+**No Versions** rather than failing quietly.
+
+## Needs Attention
+
+The header button opens the review inbox: what is actually waiting on you.
+
+- a note somebody else left on one of your versions
+- a reply to a note you wrote
+- a version a supervisor rejected or sent back for revision
+
+All of it derived from entities ShotGrid already keeps — no event type is
+invented. Status codes come from `config.REVIEW_STATUS_TYPES`; note that `rev`
+is deliberately absent, since that is the status a fresh publish gets and
+flagging it would mark everything you just published.
+
+The whole inbox is **four queries** regardless of show size, and it is loaded on
+demand and on Refresh — never polled. Clicking an item opens the version it is
+about, selected in the browser, with its notes; you never go looking for it.
+
+Read state is a small JSON file of item ids and timestamps
+(`~/.shotdeck/review_read.json`, `SHOTDECK_REVIEW_STATE`) — ShotGrid has no
+per-user read flag ShotDeck may write, and this is deliberately not a
+notification database. Nothing from ShotGrid is copied into it.
+
+The same review data puts a dot on the task row next to its latest version, and
+the dot carries its reason in the tooltip: *"Sam added a note on
+SH010_Comp_v006, 2h ago"*. A dot that cannot explain itself is noise.
+
 ## Tests
 
 ```bash

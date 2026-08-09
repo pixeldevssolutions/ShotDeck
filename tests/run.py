@@ -39,6 +39,8 @@ MODULES = [
     "test_preflight",
     "test_publish_service",
     "test_notes_service",
+    "test_latest_version",
+    "test_review_service",
     "test_sg_client",
     "test_ui",
 ]

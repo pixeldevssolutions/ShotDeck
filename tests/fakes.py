@@ -112,6 +112,10 @@ class FakeShotgun:
             raise self.fail_find
         if entity_type == "Version":
             rows = [v for v in self.versions if _matches(v, filters)]
+            if any(f[0] == "id" and f[1] == "is" for f in filters
+                   if not isinstance(f, dict)):
+                wanted = next(f[2] for f in filters if f[0] == "id")
+                rows = [v for v in self.versions if v["id"] == wanted]
             if order:
                 key = order[0]["field_name"]
                 rows.sort(key=lambda v: str(v.get(key) or ""),
@@ -125,8 +129,14 @@ class FakeShotgun:
         if entity_type == "Reply":
             return [r for r in self.replies if _matches(r, filters)]
         if entity_type == "HumanUser":
-            wanted = next((f[2] for f in filters if f[0] == "id"), [])
-            return [u for u in self.users if u["id"] in wanted]
+            simple = [f for f in filters if not isinstance(f, dict)]
+            wanted = next((f[2] for f in simple if f[0] == "id"), None)
+            if wanted is not None:
+                return [u for u in self.users if u["id"] in wanted]
+            # The bootstrap looks the artist up by email, so the fake has to
+            # answer that too or every integration path runs without an owner.
+            return [u for u in self.users
+                    if all(u.get(f[0]) == f[2] for f in simple)]
         if entity_type == "Step":
             return [{"type": "Step", "id": 9, "code": "Comp",
                      "entity_type": "Shot"},
@@ -221,8 +231,12 @@ def _matches(version, filters):
         elif op == "in":
             wanted = value if isinstance(value, list) else [value]
             if isinstance(actual, dict):
-                if not any(isinstance(w, dict) and w.get("id") == actual["id"]
-                           for w in wanted):
+                if not _links_match([actual], wanted):
+                    return False
+            elif isinstance(actual, list):
+                # A multi-entity field such as note_links: it matches if any
+                # of its links is one of the wanted entities.
+                if not _links_match(actual, wanted):
                     return False
             elif actual not in wanted:
                 return False
@@ -235,6 +249,19 @@ def _matches(version, filters):
         elif op in ("in_last", "in_calendar_day", "between"):
             continue          # dates are the server's business, not the fake's
     return True
+
+
+def _links_match(links, wanted):
+    for link in links:
+        if not isinstance(link, dict):
+            continue
+        for want in wanted:
+            if not isinstance(want, dict):
+                continue
+            if link.get("id") == want.get("id") and \
+                    link.get("type") == want.get("type"):
+                return True
+    return False
 
 
 def _deep_get(version, field):
