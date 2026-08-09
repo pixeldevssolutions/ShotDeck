@@ -12,6 +12,7 @@ import tempfile
 from PySide6.QtCore import QThreadPool, QMimeData, QUrl, QPointF, Qt
 from PySide6.QtGui import QPixmap, QColor, QDropEvent, QDragEnterEvent
 from PySide6.QtWidgets import QApplication, QMenu
+from PySide6.QtWidgets import QLabel as QLabelType
 
 import config
 import fakes
@@ -138,17 +139,64 @@ def test_duplicate_name_warns_and_blocks_before_any_upload():
 
 def test_media_is_inspected_off_the_ui_thread():
     dialog = _dialog()
-    dialog.file_edit.setText(PNG)
-    settle()
+    _choose(dialog, PNG)
     assert dialog.media_info is not None
     assert "400 × 225" in dialog.file_info.text()
+
+
+def test_preflight_reports_before_anything_is_created():
+    sg = fakes.FakeShotgun()
+    dialog = _dialog(sg)
+    _choose(dialog, PNG)
+    assert dialog.report is not None
+    assert not any(c[0] == "create" for c in sg.calls), \
+        "the preflight must not create anything"
+    text = _labels(dialog.preflight_panel)
+    assert "Project: UAT6" in text
+    assert "Version name available" in text
+
+
+def test_a_warning_must_be_accepted_before_publish_is_offered():
+    """The fixtures live in the OS temp directory, which is exactly the case
+    the path policy exists for."""
+    dialog = _dialog()
+    dialog.file_edit.setText(PNG)
+    dialog._run_preflight()
+    settle()
+    assert dialog.report.warnings
+    assert dialog.accept_warnings.isVisible()
+    assert not dialog.publish_btn.isEnabled(), \
+        "a warning must not be publishable until it is acknowledged"
+
+    dialog.accept_warnings.setChecked(True)
+    assert dialog.publish_btn.isEnabled()
+
+
+def test_an_error_cannot_be_ticked_past():
+    dialog = _dialog()
+    txt = os.path.join(TMP, "notes.txt")
+    open(txt, "w").write("hello")
+    dialog.file_edit.setText(txt)
+    dialog._run_preflight()
+    settle()
+    assert not dialog.report.passed
+    assert not dialog.accept_warnings.isVisible(), \
+        "there is no continuing past an error"
+    assert not dialog.publish_btn.isEnabled()
+
+
+def test_media_from_another_project_is_refused_in_the_dialog():
+    dialog = _dialog()
+    dialog.file_edit.setText("/jobs/SHOW002/renders/v001.mov")
+    dialog._run_preflight()
+    settle()
+    assert not dialog.publish_btn.isEnabled()
 
 
 def test_publish_shows_a_result_with_the_api_identity():
     sg = fakes.FakeShotgun()
     dialog = _dialog(sg)
-    dialog.file_edit.setText(PNG)
-    settle()
+    _choose(dialog, PNG)
     dialog._publish()
     settle()
 
@@ -321,6 +369,500 @@ def test_browser_empty_state_when_nothing_matches():
     assert browser.count_lbl.text() in ("", "0 versions")
 
 
+# -- notes in the browser --------------------------------------------------
+
+def _browser_with_notes():
+    sg = fakes.FakeShotgun()
+    version = sg.add_version("SH010_Comp_v004")
+    note = sg.add_note(version["id"], "Reduce brightness.",
+                       user=fakes.CLIENT)
+    sg.add_reply(note["id"], "Can Comp investigate?", user=fakes.PRODUCER)
+    sg.add_reply(note["id"], "Updated in v005.", user=fakes.ARTIST)
+    browser = _browser(sg)
+    browser.tabs.setCurrentIndex(1)          # Notes
+    browser.table.selectRow(0)
+    settle()
+    return sg, browser
+
+
+def test_notes_show_for_the_selected_version_with_their_authors():
+    sg, browser = _browser_with_notes()
+    text = _labels(browser.notes)
+    assert "Reduce brightness." in text
+    assert "Sam" in text and "CLIENT" in text
+    assert "Can Comp investigate?" in text
+    assert "Updated in v005." in text
+
+
+def test_replies_are_drawn_under_their_note():
+    from ui.notes_panel import MessageCard
+
+    sg, browser = _browser_with_notes()
+    cards = browser.notes.findChildren(MessageCard)
+    kinds = [c.message.kind for c in cards]
+    assert kinds == ["note", "reply", "reply"]
+    assert all(c.message.depth == 1 for c in cards if c.message.kind == "reply")
+
+
+def test_edit_and_delete_only_appear_on_your_own_messages():
+    from PySide6.QtWidgets import QPushButton
+    from ui.notes_panel import MessageCard
+
+    sg, browser = _browser_with_notes()
+    cards = browser.notes.findChildren(MessageCard)
+    buttons = {c.message.author_name:
+               [b.text() for b in c.findChildren(QPushButton)]
+               for c in cards}
+    assert "Delete" not in buttons["Sam"], "the client's note is not ours"
+    assert "Delete" in buttons["Jitesh"], "our own reply is"
+
+
+def test_posting_a_note_writes_to_shotgrid_and_reloads_notes_only():
+    sg, browser = _browser_with_notes()
+    version_queries = len([c for c in sg.calls
+                           if c[0] == "find" and c[1] == "Version"])
+
+    browser.notes.compose.setPlainText("Grade updated.")
+    browser.notes._post()
+    settle()
+
+    created = [c for c in sg.calls if c[0] == "create" and c[1] == "Note"]
+    assert created and created[0][2]["content"] == "Grade updated."
+    assert "Grade updated." in _labels(browser.notes)
+    assert len([c for c in sg.calls
+                if c[0] == "find" and c[1] == "Version"]) == version_queries, \
+        "refreshing notes must not re-query the version list"
+
+
+def test_replying_from_the_card_creates_a_reply():
+    sg, browser = _browser_with_notes()
+    thread = browser.notes.threads[0]
+    browser.notes._start_reply(thread)
+    browser.notes.compose.setPlainText("On it.")
+    browser.notes._post()
+    settle()
+    assert sg.replies[-1]["content"] == "On it."
+    assert sg.replies[-1]["entity"]["id"] == thread.id
+
+
+def test_the_activity_tab_merges_notes_and_the_publish():
+    sg, browser = _browser_with_notes()
+    browser.tabs.setCurrentIndex(2)          # Activity
+    settle()
+    text = _labels(browser.activity)
+    assert "published SH010_Comp_v004" in text
+    assert "wrote:" in text and "replied:" in text
+
+
+def test_notes_failure_is_reported_in_place():
+    sg = fakes.FakeShotgun()
+    sg.add_version("SH010_Comp_v004")
+    browser = _browser(sg)
+    browser.table.selectRow(0)
+    settle()
+
+    sg.fail_find = RuntimeError("Permission denied on Note")
+    browser.notes._cooldown.stop()
+    browser.notes.refresh()
+    settle()
+    assert "Notes unavailable" in browser.notes.status.text()
+
+
+# -- latest version on the task row ----------------------------------------
+
+def test_the_task_row_shows_its_latest_version():
+    from ui.software_page import TasksTable
+
+    table = TasksTable()
+    table.set_tasks([fakes.TASK])
+    table.set_latest_versions(
+        {fakes.TASK["id"]: {"id": 9001, "code": "SH010_Comp_v006",
+                            "sg_status_list": "rev"}})
+    assert table.table.item(0, TasksTable.COL_LATEST).text() == \
+        "SH010_Comp_v006"
+
+
+def test_a_task_with_no_versions_shows_nothing_rather_than_breaking():
+    from ui.software_page import TasksTable
+
+    table = TasksTable()
+    table.set_tasks([fakes.TASK])
+    table.set_latest_versions({})
+    assert table.table.item(0, TasksTable.COL_LATEST).text() == ""
+
+    menu = QMenu()
+    sub = table._add_latest_version_actions(menu, fakes.TASK)
+    assert sub.actions()[0].text() == "No Versions"
+    assert not sub.actions()[0].isEnabled()
+
+
+def test_open_latest_version_carries_the_task_and_the_version():
+    from ui.software_page import TasksTable
+
+    table = TasksTable()
+    latest = {"id": 9001, "code": "SH010_Comp_v006"}
+    table.set_tasks([fakes.TASK])
+    table.set_latest_versions({fakes.TASK["id"]: latest})
+
+    got = []
+    table.latest_version_requested.connect(lambda t, v: got.append((t, v)))
+    menu = QMenu()
+    table._add_latest_version_actions(menu, fakes.TASK).actions()[0].trigger()
+    assert got and got[0][0]["id"] == fakes.TASK["id"]
+    assert got[0][1]["code"] == "SH010_Comp_v006"
+
+
+def test_the_review_dot_says_why_it_is_there():
+    from ui.software_page import TasksTable
+
+    table = TasksTable()
+    table.set_tasks([fakes.TASK])
+    table.set_latest_versions(
+        {fakes.TASK["id"]: {"id": 9001, "code": "SH010_Comp_v006"}})
+    table.set_attention(
+        {fakes.TASK["id"]: "Sam added a note on SH010_Comp_v006, 2h ago"})
+
+    cell = table.table.item(0, TasksTable.COL_LATEST)
+    assert cell.text().endswith("●")
+    assert "Sam added a note" in cell.toolTip(), \
+        "a dot with no explanation is noise"
+
+
+# -- needs attention -------------------------------------------------------
+
+def _review_page():
+    from ui.review_page import ReviewPage
+
+    sg = fakes.FakeShotgun()
+    version = sg.add_version("SH010_Comp_v006", user=fakes.ARTIST,
+                             project=fakes.PROJECT, entity=fakes.SHOT)
+    sg.add_note(version["id"], "Please reduce the brightness.",
+                user=fakes.CLIENT)
+
+    page = ReviewPage(fakes.client(sg))
+    page.service.read_state.path = os.path.join(TMP, "review_read.json")
+    page.service.read_state.seen = {}
+    page.show()
+    page.refresh()
+    settle()
+    return sg, page, version
+
+
+def test_needs_attention_lists_review_items():
+    from ui.review_page import ReviewCard
+
+    sg, page, version = _review_page()
+    cards = page.findChildren(ReviewCard)
+    assert len(cards) == 1
+    text = _labels(page)
+    assert "added a note" in text
+    assert "SH010" in text and "SH010_Comp_v006" in text
+    assert "reduce the brightness" in text.lower()
+
+
+def test_needs_attention_is_empty_when_there_is_nothing_to_do():
+    from ui.review_page import ReviewPage
+
+    page = ReviewPage(fakes.client(fakes.FakeShotgun()))
+    page.show()
+    page.refresh()
+    settle()
+    assert page.stack.currentWidget() is page.empty
+
+
+def test_opening_an_item_marks_it_read_and_navigates_to_the_version():
+    from ui.review_page import ReviewCard
+
+    sg, page, version = _review_page()
+    counts = []
+    page.count_changed.connect(counts.append)
+    targets = []
+    page.item_opened.connect(targets.append)
+
+    page.findChildren(ReviewCard)[0].opened.emit(page.items[0])
+    settle()
+
+    assert targets and targets[0].version["id"] == version["id"], \
+        "opening an item must land on the version, not on a search"
+    assert page.service.read_state.is_read(targets[0])
+    assert counts and counts[-1] == 0, "the unread count should drop"
+
+
+def test_the_unread_count_is_reported_for_the_header():
+    sg, page, version = _review_page()
+    counts = []
+    page.count_changed.connect(counts.append)
+    page._render()
+    assert counts[-1] == 1
+
+
+def test_review_items_feed_the_task_dots():
+    sg, page, version = _review_page()
+    reasons = page.attention_by_task()
+    assert fakes.TASK["id"] in reasons
+    assert "added a note" in reasons[fakes.TASK["id"]]
+
+
+# -- compare ---------------------------------------------------------------
+
+def _compare(version_a, version_b, sg=None):
+    from ui.version_compare import VersionCompare
+
+    dialog = VersionCompare(fakes.client(sg or fakes.FakeShotgun()),
+                            fakes.PROJECT, version_a, version_b)
+    dialog.show()
+    settle()
+    return dialog
+
+
+def _image_version(code, size=(400, 225), colour="#3d9dff"):
+    path = os.path.join(TMP, f"{code}.png")
+    pm = QPixmap(*size)
+    pm.fill(QColor(colour))
+    pm.save(path)
+    return {"id": abs(hash(code)) % 10000, "code": code,
+            "sg_path_to_movie": path, "user": fakes.ARTIST,
+            "sg_status_list": "rev", "description": f"{code} description"}
+
+
+def test_compare_any_two_versions_not_just_neighbours():
+    a = _image_version("SH010_Comp_v007")
+    b = _image_version("SH010_Comp_v001", colour="#f87171")
+    dialog = _compare(a, b)
+    text = _labels(dialog)
+    assert "SH010_Comp_v007" in text and "SH010_Comp_v001" in text
+
+
+def test_compare_modes_switch():
+    from ui.version_compare import SIDE_BY_SIDE, AB, WIPE
+
+    dialog = _compare(_image_version("v006"), _image_version("v005"))
+    for mode in (SIDE_BY_SIDE, AB, WIPE):
+        dialog.set_mode(mode)
+        assert dialog.image_view.mode == mode
+    assert dialog.wipe_slider.isVisible(), "wipe needs its divider"
+
+    dialog.set_mode(AB)
+    before = dialog.image_view.showing_b
+    dialog.image_view.toggle()
+    assert dialog.image_view.showing_b != before
+
+
+def test_difference_is_offered_for_matching_stills():
+    from ui.version_compare import DIFFERENCE
+
+    dialog = _compare(_image_version("v006"),
+                      _image_version("v005", colour="#34d399"))
+    ok, why = dialog.image_view.difference_available()
+    assert ok, why
+    dialog.set_mode(DIFFERENCE)
+    assert dialog.image_view.mode == DIFFERENCE
+    assert dialog.image_view._difference() is not None
+
+
+def test_difference_is_refused_when_resolutions_differ():
+    dialog = _compare(_image_version("v006", size=(400, 225)),
+                      _image_version("v005", size=(512, 288)))
+    ok, why = dialog.image_view.difference_available()
+    assert not ok
+    assert "matching resolutions" in why
+    assert dialog.image_view._difference() is None
+
+
+def test_differing_resolutions_are_stated_rather_than_hidden():
+    dialog = _compare(_image_version("v006", size=(400, 225)),
+                      _image_version("v005", size=(512, 288)))
+    text = _labels(dialog)
+    assert "400 × 225" in text and "512 × 288" in text
+
+
+def test_missing_media_compares_without_crashing():
+    a = {"id": 1, "code": "v006", "sg_path_to_movie": "/nowhere/v006.mov"}
+    b = _image_version("v005")
+    dialog = _compare(a, b)
+    assert dialog.media_a.error
+    ok, why = dialog.image_view.difference_available()
+    assert not ok and "still images" in why
+
+
+def test_movies_get_the_ab_workflow_rather_than_a_fake_sync():
+    mov = os.path.join(TMP, "SH010_comp_v006.mov")
+    open(mov, "wb").write(b"\x00" * 1024)
+    a = {"id": 1, "code": "v006", "sg_path_to_movie": mov}
+    b = {"id": 2, "code": "v005", "sg_path_to_movie": mov}
+    dialog = _compare(a, b)
+    assert dialog.stack.currentWidget() is dialog.movie_view
+    assert "A/B" in dialog.movie_note.text()
+
+
+def test_notes_are_visible_while_comparing():
+    sg = fakes.FakeShotgun()
+    a = _image_version("SH010_Comp_v006")
+    b = _image_version("SH010_Comp_v005")
+    sg.add_note(a["id"], "Reduce brightness.", user=fakes.CLIENT)
+    sg.add_note(b["id"], "Previous client feedback.", user=fakes.PRODUCER)
+
+    dialog = _compare(a, b, sg)
+    text = _labels(dialog)
+    assert "Reduce brightness." in text
+    assert "Previous client feedback." in text
+    # Each note says which version it belongs to.
+    assert "SH010_Comp_v006" in text and "SH010_Comp_v005" in text
+
+
+def test_compare_metadata_marks_what_differs():
+    a = _image_version("v006")
+    b = _image_version("v005", size=(512, 288))
+    dialog = _compare(a, b)
+    labels = [l for l in dialog.findChildren(QLabelType)
+              if l.objectName() == "checkWarn"]
+    assert labels, "a difference between the two columns should be marked"
+
+
+def _seed_thumbnail(url, size=(320, 180), colour="#a78bfa"):
+    """Put an image in the shared thumbnail cache, so nothing is downloaded."""
+    from PySide6.QtCore import QBuffer, QByteArray
+    from ui import widgets
+
+    pm = QPixmap(*size)
+    pm.fill(QColor(colour))
+    data = QByteArray()
+    buffer = QBuffer(data)
+    buffer.open(QBuffer.WriteOnly)
+    pm.save(buffer, "PNG")
+    buffer.close()
+    widgets._thumb_cache[url] = bytes(data.data())
+    return url
+
+
+def test_compare_falls_back_to_the_shotgrid_thumbnail():
+    """Most versions on a live site have no local media path — published by
+    another tool, or on a mount this workstation does not have. Without the
+    thumbnail fallback both panes are empty and compare looks broken."""
+    url_a = _seed_thumbnail("https://sg.example/v006.png")
+    url_b = _seed_thumbnail("https://sg.example/v005.png", colour="#34d399")
+    a = {"id": 1, "code": "SH010_Comp_v006", "image": url_a}
+    b = {"id": 2, "code": "SH010_Comp_v005", "image": url_b}
+
+    dialog = _compare(a, b)
+    assert not dialog.media_a.pixmap.isNull()
+    assert not dialog.media_b.pixmap.isNull()
+    assert dialog.media_a.source == "thumbnail"
+    assert not dialog.media_a.error
+
+
+def test_compare_says_which_source_is_on_screen():
+    url = _seed_thumbnail("https://sg.example/v004.png")
+    a = {"id": 1, "code": "v006", "image": url}
+    b = {"id": 2, "code": "v005", "image": url}
+    dialog = _compare(a, b)
+    assert "ShotGrid thumbnail" in _labels(dialog), \
+        "comparing thumbnails is useful, but must not look like the renders"
+
+
+def test_side_by_side_paints_both_versions():
+    from PySide6.QtGui import QImage, QPainter
+    from ui.version_compare import SIDE_BY_SIDE
+
+    a = _image_version("paint_a", colour="#3d9dff")
+    b = _image_version("paint_b", colour="#f87171")
+    dialog = _compare(a, b)
+    dialog.set_mode(SIDE_BY_SIDE)
+    view = dialog.image_view
+    view.resize(600, 300)
+    settle()
+
+    image = QImage(view.size(), QImage.Format_RGB32)
+    view.render(image)
+    left = image.pixelColor(150, 150)
+    right = image.pixelColor(450, 150)
+    assert left != right, "the two sides should not be painting the same thing"
+    assert QColor("#3d9dff") in (left,) or left.blue() > left.red()
+    assert right.red() > right.blue()
+
+
+def test_wipe_shows_a_of_one_side_and_b_of_the_other():
+    from PySide6.QtGui import QImage
+    from ui.version_compare import WIPE
+
+    a = _image_version("wipe_a", colour="#3d9dff")
+    b = _image_version("wipe_b", colour="#f87171")
+    dialog = _compare(a, b)
+    dialog.set_mode(WIPE)
+    view = dialog.image_view
+    view.resize(600, 300)
+    view.set_wipe(0.5)
+    settle()
+
+    image = QImage(view.size(), QImage.Format_RGB32)
+    view.render(image)
+    assert image.pixelColor(100, 150).blue() > image.pixelColor(100, 150).red()
+    assert image.pixelColor(500, 150).red() > image.pixelColor(500, 150).blue()
+
+
+def test_thumbnails_appear_beside_versions_in_the_list():
+    url = _seed_thumbnail("https://sg.example/row.png")
+    sg = fakes.FakeShotgun()
+    sg.add_version("SH010_Comp_v001", image=url)
+    browser = _browser(sg)
+    settle()
+    assert not browser.table.item(0, 0).icon().isNull(), \
+        "the version list should show the version"
+
+
+def test_a_version_with_no_thumbnail_still_lists():
+    sg = fakes.FakeShotgun()
+    sg.add_version("SH010_Comp_v001", image=None)
+    browser = _browser(sg)
+    settle()
+    assert browser.table.item(0, 0).text() == "SH010_Comp_v001"
+    assert browser.table.item(0, 0).icon().isNull()
+
+
+# -- integration -----------------------------------------------------------
+
+def test_browser_compare_menu_offers_previous_latest_and_pick():
+    sg = fakes.FakeShotgun()
+    for code in ("SH010_Comp_v001", "SH010_Comp_v002", "SH010_Comp_v003"):
+        sg.add_version(code)
+    browser = _browser(sg)
+    menu = QMenu()
+    middle = browser._versions[1]            # v002
+    sub = browser._add_compare_actions(menu, middle)
+    texts = [a.text() for a in sub.actions() if a.text()]
+    assert any("previous" in t.lower() for t in texts)
+    assert any("latest" in t.lower() for t in texts)
+    assert any("Compare With" in t for t in texts)
+
+
+def test_browser_previous_version_uses_timestamps():
+    sg = fakes.FakeShotgun()
+    for code in ("SH010_Comp_v010", "SH010_Comp_v011", "SH010_Comp_v002"):
+        sg.add_version(code)
+    browser = _browser(sg)
+    newest = browser._versions[0]
+    assert newest["code"] == "SH010_Comp_v002", "newest by timestamp"
+    assert browser._previous_version(newest)["code"] == "SH010_Comp_v011"
+
+
+def test_selecting_a_version_by_id_lands_on_it():
+    sg = fakes.FakeShotgun()
+    for code in ("SH010_Comp_v001", "SH010_Comp_v002", "SH010_Comp_v003"):
+        sg.add_version(code)
+    target = sg.versions[0]
+    browser = _browser(sg)
+    browser.select_version(target["id"])
+    settle()
+    assert browser._selected()["id"] == target["id"]
+
+
+def test_publish_new_version_is_offered_from_the_browser():
+    sg = fakes.FakeShotgun()
+    sg.add_version("SH010_Comp_v001")
+    browser = _browser(sg)
+    assert browser.publish_btn.isEnabled()
+
+
 # -- helpers ---------------------------------------------------------------
 
 def _drop(widget, paths):
@@ -333,6 +875,17 @@ def _drop(widget, paths):
                                      Qt.CopyAction, mime, Qt.LeftButton,
                                      Qt.NoModifier))
     app.processEvents()
+
+
+def _choose(dialog, path):
+    """Pick a file, run the preflight now rather than after the debounce, and
+    accept the temp-directory warning the fixtures inevitably raise."""
+    dialog.file_edit.setText(path)
+    dialog._run_preflight()
+    settle()
+    if dialog.accept_warnings.isVisible():
+        dialog.accept_warnings.setChecked(True)
+    return dialog.report
 
 
 def _same(a, b):

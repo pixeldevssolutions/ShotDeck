@@ -8,6 +8,23 @@ import config
 log = applog.get()
 
 
+def _newer(candidate, current, field):
+    """Compare on the configured field, tolerating a site that leaves it null.
+
+    The order= on the query already sorts; this only decides ties and copes
+    with rows the sort could not place.
+    """
+    left, right = candidate.get(field), current.get(field)
+    if left is None:
+        return False
+    if right is None:
+        return True
+    try:
+        return left > right
+    except TypeError:                                # pragma: no cover
+        return str(left) > str(right)
+
+
 def _media_fields(info):
     """Stock Version fields worth filling in from an inspected media file.
 
@@ -53,6 +70,8 @@ class SGClient:
         self._version_statuses = None    # Version statuses
         self._steps = None               # pipeline steps, aka departments
         self._version_field_cache = None
+        self._optional_fields = []       # the ones this site turned out to have
+        self._users = {}                 # id -> HumanUser, for note authors
 
     @property
     def api_identity(self):
@@ -174,6 +193,37 @@ class SGClient:
             order=[{"field_name": "created_at", "direction": "desc"}],
         )
 
+    def latest_versions_for_tasks(self, task_ids):
+        """{task_id: newest Version} for a whole page of tasks, in one query.
+
+        One `find` with the task ids in an `in` filter, reduced here -- a query
+        per task is the N+1 that makes a task list crawl on a busy show.
+        "Newest" is ShotGrid's timestamp, not the version name: v010, v011,
+        v002 is a real publishing order and max(name) reads it backwards.
+        """
+        task_ids = [i for i in (task_ids or []) if i]
+        if not task_ids:
+            return {}
+
+        field = config.LATEST_VERSION_FIELD
+        rows = self.sg.find(
+            "Version",
+            [[config.VERSION_TASK_FIELD, "in",
+              [{"type": "Task", "id": i} for i in task_ids]]],
+            config.LATEST_VERSION_FIELDS,
+            order=[{"field_name": field, "direction": "desc"}],
+        )
+
+        latest = {}
+        for row in rows:
+            task_id = (row.get(config.VERSION_TASK_FIELD) or {}).get("id")
+            if task_id is None:
+                continue
+            best = latest.get(task_id)
+            if best is None or _newer(row, best, field):
+                latest[task_id] = row
+        return latest
+
     # -- version browser ---------------------------------------------------
 
     def versions(self, entity=None, task_id=None, filters=None,
@@ -191,12 +241,24 @@ class SGClient:
         if task_id:
             found.append([config.VERSION_TASK_FIELD, "is",
                           {"type": "Task", "id": task_id}])
-        return self.sg.find(
-            "Version", found, fields or self._version_fields(),
-            order=order or [{"field_name": "created_at",
-                             "direction": "desc"}],
-            limit=limit, page=page,
-        )
+        order = order or [{"field_name": "created_at", "direction": "desc"}]
+        try:
+            return self.sg.find(
+                "Version", found, fields or self._version_fields(),
+                order=order, limit=limit, page=page)
+        except Exception as e:
+            if fields or not self._optional_fields:
+                raise
+            # A field this site does not have fails the whole query. Rather
+            # than leaving the browser looking broken, drop the optional ones
+            # and carry on with less detail.
+            log.warning("version query failed with the optional fields (%s); "
+                        "retrying with the core fields only", e)
+            self._optional_fields = []
+            self._version_field_cache = list(config.VERSION_FIELDS)
+            return self.sg.find(
+                "Version", found, self._version_field_cache,
+                order=order, limit=limit, page=page)
 
     def _version_fields(self):
         """VERSION_FIELDS, plus any optional field this site turns out to have.
@@ -208,14 +270,49 @@ class SGClient:
             return self._version_field_cache
 
         fields = list(config.VERSION_FIELDS)
+        self._optional_fields = []
         for name in config.VERSION_OPTIONAL_FIELDS:
             try:
                 if self.sg.schema_field_read("Version", name):
                     fields.append(name)
+                    self._optional_fields.append(name)
             except Exception as e:
                 log.info("Version.%s not available on this site (%s)", name, e)
         self._version_field_cache = fields
         return fields
+
+    def compare_pair(self, version_id):
+        """(this version, the one published before it on the same task).
+
+        Two queries: the version itself, then its task's versions. The second
+        is ordered by the same timestamp the Latest Version column uses, so
+        "previous" means the same thing everywhere.
+        """
+        version = self.sg.find_one(
+            "Version", [["id", "is", version_id]], self._version_fields())
+        if not version:
+            raise RuntimeError(f"Version {version_id} no longer exists.")
+
+        task = version.get(config.VERSION_TASK_FIELD) or {}
+        if not task.get("id"):
+            return version, None
+
+        field = config.LATEST_VERSION_FIELD
+        siblings = self.sg.find(
+            "Version",
+            [[config.VERSION_TASK_FIELD, "is",
+              {"type": "Task", "id": task["id"]}]],
+            self._version_fields(),
+            order=[{"field_name": field, "direction": "desc"}])
+
+        previous = None
+        for row in siblings:
+            if row["id"] == version_id:
+                continue
+            if _newer(version, row, field):
+                previous = row
+                break
+        return version, previous
 
     def version_statuses(self):
         """[(code, label), ...] from the site's own Version status list."""
@@ -315,6 +412,130 @@ class SGClient:
         """Retire a Version -- used to clean up after a cancelled publish."""
         log.info("deleting Version %s", version_id)
         return self.sg.delete("Version", version_id)
+
+    # -- notes -------------------------------------------------------------
+    #
+    # ShotGrid's own model: a Note links to entities through note_links, and
+    # replies are Reply entities pointing back at the Note. ShotDeck stores
+    # nothing of its own -- production notes belong to ShotGrid.
+
+    def notes_for_version(self, version_id):
+        return self.sg.find(
+            "Note",
+            [["note_links", "is", {"type": "Version", "id": version_id}]],
+            config.NOTE_FIELDS,
+            order=[{"field_name": "created_at", "direction": "asc"}],
+        )
+
+    def notes_for_versions(self, version_ids):
+        """Notes on any of these versions, in one query rather than one each."""
+        if not version_ids:
+            return []
+        return self.sg.find(
+            "Note",
+            [["note_links", "in",
+              [{"type": "Version", "id": i} for i in version_ids]]],
+            config.NOTE_FIELDS,
+            order=[{"field_name": "created_at", "direction": "desc"}],
+        )
+
+    def notes_by_user(self, user, project=None, days=30):
+        """Notes this artist wrote recently -- the ones replies can arrive on."""
+        filters = [
+            ["user", "is", {"type": user["type"], "id": user["id"]}],
+            ["created_at", "in_last", [days, "DAY"]],
+        ]
+        if project:
+            filters.append(["project", "is",
+                            {"type": "Project", "id": project["id"]}])
+        return self.sg.find(
+            "Note", filters, config.NOTE_FIELDS,
+            order=[{"field_name": "created_at", "direction": "desc"}])
+
+    def versions_by_user(self, user, project=None, days=30):
+        """The artist's own versions in the window, for the review inbox."""
+        filters = [
+            ["user", "is", {"type": user["type"], "id": user["id"]}],
+            ["created_at", "in_last", [days, "DAY"]],
+        ]
+        if project:
+            filters.append(["project", "is",
+                            {"type": "Project", "id": project["id"]}])
+        return self.sg.find(
+            "Version", filters, self._version_fields(),
+            order=[{"field_name": "created_at", "direction": "desc"}])
+
+    def replies_for_notes(self, note_ids):
+        """Every reply to these notes, in one query rather than one each."""
+        if not note_ids:
+            return []
+        return self.sg.find(
+            "Reply",
+            [["entity", "in",
+              [{"type": "Note", "id": i} for i in note_ids]]],
+            config.REPLY_FIELDS,
+            order=[{"field_name": "created_at", "direction": "asc"}],
+        )
+
+    def create_note(self, project, version, content, subject="", task=None):
+        """A note on a Version, credited to the artist, not to the script."""
+        data = {
+            "project": {"type": "Project", "id": project["id"]},
+            "subject": subject or "",
+            "content": content,
+            "note_links": [{"type": "Version", "id": version["id"]}],
+        }
+        entity = (task or {}).get("entity")
+        if entity:
+            data["note_links"].append({"type": entity["type"],
+                                       "id": entity["id"]})
+        if task and task.get("id"):
+            data["tasks"] = [{"type": "Task", "id": task["id"]}]
+        if self._owner:
+            data["user"] = {"type": self._owner["type"],
+                            "id": self._owner["id"]}
+        log.info("adding a note to Version %s", version["id"])
+        return self.sg.create("Note", data)
+
+    def create_reply(self, note_id, content):
+        data = {
+            "entity": {"type": "Note", "id": note_id},
+            "content": content,
+        }
+        if self._owner:
+            data["user"] = {"type": self._owner["type"],
+                            "id": self._owner["id"]}
+        log.info("replying to Note %s", note_id)
+        return self.sg.create("Reply", data)
+
+    def update_note(self, entity_type, entity_id, content):
+        field = "content"
+        log.info("editing %s %s", entity_type, entity_id)
+        return self.sg.update(entity_type, entity_id, {field: content})
+
+    def delete_entity(self, entity_type, entity_id):
+        log.info("deleting %s %s", entity_type, entity_id)
+        return self.sg.delete(entity_type, entity_id)
+
+    def users(self, user_ids):
+        """Author details, including the role ShotGrid itself assigns them.
+
+        One query for all the authors on screen, cached for the session: a
+        per-note lookup would be a query per row.
+        """
+        wanted = [i for i in set(user_ids or []) if i not in self._users]
+        if wanted:
+            try:
+                found = self.sg.find(
+                    "HumanUser", [["id", "in", wanted]], config.USER_FIELDS)
+            except Exception as e:
+                log.warning("could not read note authors: %s", e)
+                found = []
+            for user in found:
+                self._users[user["id"]] = user
+            for missing in wanted:
+                self._users.setdefault(missing, None)
+        return {i: self._users.get(i) for i in set(user_ids or [])}
 
     def publish_version(self, project, task, name, path, description="",
                         on_progress=None, work_file=""):

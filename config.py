@@ -106,24 +106,83 @@ VERSION_STATUS = "rev"
 # off the linked task rather than a second round trip. A field the site does
 # not have makes the whole find() fail, so anything non-stock added here has to
 # exist -- VERSION_OPTIONAL_FIELDS below is the safe place for the rest.
+# Only fields every ShotGrid site has. Anything a site might have renamed or
+# removed belongs in VERSION_OPTIONAL_FIELDS below -- one unknown field fails
+# the entire find(), which reads as "the version browser is broken".
 VERSION_FIELDS = [
     "code", "description", "sg_status_list", "user", "created_by",
     "created_at", "updated_at", "entity", "sg_task", "image",
-    "sg_uploaded_movie", "sg_path_to_movie", "sg_path_to_frames",
-    "sg_first_frame", "sg_last_frame", "frame_count", "frame_range",
     "sg_task.Task.step",
     "sg_task.Task.content",
 ]
 
-# Tried once and dropped for the session if the site does not have them, so a
-# studio-specific field can be listed without risking every query.
-VERSION_OPTIONAL_FIELDS = []
+# Probed once against the schema and kept for the session if the site has them.
+# These are stock fields, but stock is not the same as universal.
+VERSION_OPTIONAL_FIELDS = [
+    "sg_uploaded_movie", "sg_path_to_movie", "sg_path_to_frames",
+    "sg_first_frame", "sg_last_frame", "frame_count", "frame_range",
+]
 
 # Versions fetched per page in the browser. The rest arrive on Load more.
 VERSION_PAGE_SIZE = 100
 
+# What "latest" means. ShotGrid's own timestamp, not the name: v010, v011, v002
+# is a real publishing order and max(name) gets it wrong. Set to "code" only if
+# a studio genuinely numbers versions in publish order.
+LATEST_VERSION_FIELD = os.environ.get("SHOTDECK_LATEST_VERSION_FIELD",
+                                      "created_at")
+
+# Fields read for the Latest Version column. Deliberately small: this is one
+# query across every task on the page.
+LATEST_VERSION_FIELDS = [
+    "code", "created_at", "sg_status_list", "sg_task", "entity", "user",
+]
+
 # How long the browser waits after a keystroke before querying ShotGrid.
 SEARCH_DEBOUNCE_MS = 300
+
+# -- notes -----------------------------------------------------------------
+#
+# ShotGrid's Note/Reply model is the whole model: a Note links to entities
+# through note_links and replies are Reply rows pointing back at it. ShotDeck
+# keeps no notes of its own.
+NOTE_FIELDS = [
+    "subject", "content", "user", "created_at", "updated_at",
+    "note_links", "tasks", "sg_status_list", "attachments",
+]
+REPLY_FIELDS = ["content", "user", "created_at", "entity"]
+
+# Read for note authors. permission_rule_set is ShotGrid's own idea of who
+# somebody is (Artist, Manager, Client, ...) -- roles are not invented here.
+USER_FIELDS = ["name", "email", "permission_rule_set", "image"]
+
+# Notes are re-read on demand, never polled. This is the shortest gap between
+# two refreshes that actually hits ShotGrid.
+NOTES_MIN_REFRESH_SECONDS = 5
+
+# -- the review inbox ------------------------------------------------------
+
+# How far back "needs attention" looks. Everything older has been dealt with
+# or has been overtaken by a newer version.
+REVIEW_WINDOW_DAYS = int(os.environ.get("SHOTDECK_REVIEW_DAYS", "30"))
+
+# Version statuses that mean somebody is waiting on the artist. Short codes,
+# because that is what the site stores -- check them against the site's own
+# status list before trusting this map (see HANDOFF).
+# Deliberately NOT "rev": that is the status a fresh publish gets
+# (VERSION_STATUS above), so treating it as an action item would mark every
+# version the artist just published as needing their attention.
+REVIEW_STATUS_TYPES = {
+    "rej": "VERSION_REJECTED",
+    "rrq": "REVISION_REQUESTED",
+    "vwd": "REVISION_REQUESTED",     # "viewed, changes wanted" on some sites
+}
+
+# Which items have been looked at. Ids and timestamps, nothing else: ShotGrid
+# has no per-user read flag ShotDeck is allowed to write.
+REVIEW_READ_STATE_PATH = os.environ.get(
+    "SHOTDECK_REVIEW_STATE",
+    os.path.expanduser("~/.shotdeck/review_read.json"))
 
 # Detail URL for an entity, used by "Open in ShotGrid".
 def entity_url(entity_type, entity_id):
@@ -167,6 +226,42 @@ def media_filter():
 # DPX; without it the dialog falls back to Qt's image reader and file size.
 FFPROBE = os.environ.get("SHOTDECK_FFPROBE", "ffprobe")
 FFPROBE_TIMEOUT = 20
+
+# -- where media is allowed to come from -----------------------------------
+#
+# A Version whose media sits on somebody's desktop is a Version nobody else can
+# use: not the farm, not review, not the artist who picks the shot up next
+# week. The project root is derived from ENTITY_PATH_TEMPLATES above rather
+# than written out again here -- one convention, one place.
+
+# What happens to media outside the approved locations:
+#   "strict"        - refused. Nothing outside the project publishes.
+#   "approved_only" - refused unless it is under one of APPROVED_MEDIA_ROOTS.
+#   "warn"          - allowed, with a warning the artist has to acknowledge.
+# Left at "warn" because the farm's mounts have not been confirmed yet; move it
+# to "approved_only" once they have. See HANDOFF §5e.
+PATH_POLICY = os.environ.get("SHOTDECK_PATH_POLICY", "warn")
+
+# Locations outside the project that are still legitimate to publish from --
+# shared plate stores, a vendor drop, a common elements library. {project} is
+# the tank_name, {project_name} the display name. Set from the environment as
+# a colon-separated list, or edit here.
+APPROVED_MEDIA_ROOTS = [
+    p for p in os.environ.get("SHOTDECK_APPROVED_MEDIA_ROOTS", "").split(os.pathsep)
+    if p.strip()
+]
+
+# The root every project lives under, used to tell "another show" apart from
+# "not a show at all". Taken from the shared prefix of ENTITY_PATH_TEMPLATES.
+JOBS_ROOT = os.environ.get("SHOTDECK_JOBS_ROOT", "/jobs")
+
+# Directories that are always the wrong place to publish from, matched on any
+# path component. Local scratch that no render node can see.
+UNSAFE_PATH_PARTS = [
+    "desktop", "downloads", "documents",
+    "tmp", "temp", "var/tmp", "appdata", "recycle.bin",
+    "cache", "proxy_cache", ".cache", "trash",
+]
 
 # -- the optional work file ------------------------------------------------
 #

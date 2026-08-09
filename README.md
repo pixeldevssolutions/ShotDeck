@@ -114,14 +114,75 @@ ever read from the environment.
 ### How it is put together
 
 ```
-ui/publish_dialog.py   input, preview, progress, result — no ShotGrid calls
-publish_service.py     validate, inspect, name, create, upload, clean up
-media_inspector.py     ffprobe / Qt, resolution, fps, duration, codec
+ui/publish_dialog.py   input, preview, preflight panel, progress, result
+ui/notes_panel.py      notes and activity, in the browser and after a publish
+publish_service.py     name, create, upload, clean up
+preflight.py           everything that must be true before ShotGrid is touched
+path_validator.py      is this file somewhere a publish may point at
+media_inspector.py     ffprobe / Qt: resolution, fps, duration, codec
+notes_service.py       ShotGrid Notes and Replies
 sg_client.py           the one ShotGrid client, script-authenticated
 ```
 
-`publish_service` imports no Qt, so the whole publish is testable headlessly;
-the dialog does no ShotGrid work of its own.
+None of the service modules import Qt, so the whole publish is testable
+headlessly; the dialogs do no ShotGrid work of their own.
+
+### Preflight
+
+Nothing is created until a full preflight passes. It runs twice — once as the
+artist picks a file, so the checklist is visible while it is still cheap to fix,
+and **again inside the publish service immediately before the Version is
+created**. The second run is not redundant: a dialog can sit open for an hour
+while a file is moved, overwritten or unmounted, and the client's opinion of a
+path is not a guarantee.
+
+```
+Context        project, entity, task, department
+Path           where the media lives (see below)
+Media          exists, readable, non-empty, known format, and what ffprobe
+               finds inside it — resolution, fps, frames, codec
+Version        the name is free, checked against ShotGrid
+Authentication which script is writing, and who gets the credit
+```
+
+Findings come at three levels. **ERROR** blocks the publish and cannot be ticked
+past. **WARNING** requires the artist to confirm it, and that confirmation is
+carried into the service and checked there — a caller that skips the dialog does
+not get to skip the decision. **INFO** is the checklist ticking along.
+
+An extension is not trusted on its own: if ffprobe ran and found no video track
+in a `.mov`, the file is corrupt or misnamed, and that is an error rather than a
+warning. Without ffprobe, ShotDeck says it could not check instead of guessing.
+
+### Media path policy
+
+Media that lives on somebody's desktop makes a Version nobody else can use —
+not the farm, not review, not whoever picks the shot up next week. So where a
+file comes from is checked before it is published.
+
+The project root is derived from `ENTITY_PATH_TEMPLATES` — the same templates
+the launcher uses — so there is one convention, not two. Containment is done
+with `os.path.commonpath` on normalised, symlink-resolved paths, never with
+`startswith`: `/jobs/SHOW001_backup` starts with `/jobs/SHOW001` and is a
+different show. `..`, relative paths, drive letters, case and symlinks are all
+resolved first.
+
+`config.PATH_POLICY`:
+
+| Policy | Media outside the approved locations |
+|---|---|
+| `strict` | Refused |
+| `approved_only` | Refused unless under `APPROVED_MEDIA_ROOTS` |
+| `warn` (current default) | Allowed once the artist confirms the warning |
+
+`APPROVED_MEDIA_ROOTS` covers the legitimate exceptions — a shared plate store,
+a vendor drop — and expands `{project}`. Both are environment-settable
+(`SHOTDECK_PATH_POLICY`, `SHOTDECK_APPROVED_MEDIA_ROOTS`).
+
+Two things are refused under **every** policy, because they are not preferences:
+media belonging to a **different show**, and media that fails the media checks.
+Local scratch (Desktop, Downloads, `/tmp`, cache directories — `UNSAFE_PATH_PARTS`)
+is a warning under `warn` and an error under the stricter policies.
 
 ### What it refuses to do
 
@@ -188,6 +249,10 @@ Right-click a task → **Versions → View Versions…** to see what has already
 published on that shot or asset. The scope switch at the top narrows it to the
 one task.
 
+Each row carries a small thumbnail beside the version name, from the same cache
+the tiles and the compare window use, so scrolling a long list downloads nothing
+twice.
+
 Filtering is done by ShotGrid, not in the client: department, artist, status,
 date range and the search box all become query filters (`version_query.py`),
 and results arrive `config.VERSION_PAGE_SIZE` at a time with a Load more button.
@@ -206,6 +271,102 @@ Selecting a version shows its thumbnail and the fields the site actually filled
 in — nothing is displayed as a dash. A version whose `sg_path_to_movie` exists
 on this machine can be played in place. Right-click gives Open in ShotGrid and
 Copy media path.
+
+## Notes
+
+The Version detail has **Details / Notes / Activity** tabs. Notes are ShotGrid
+`Note` and `Reply` entities — read from ShotGrid, written to ShotGrid, stored
+nowhere else. ShotGrid's model is one level of replies under a note, and that is
+what the UI draws rather than inventing nesting ShotGrid cannot keep.
+
+Each message shows its author, the author's ShotGrid **permission rule set**
+(Artist, Manager, Client — ShotGrid's own idea of who they are, not a role
+ShotDeck made up), the time, and the text. Edit and Delete appear only on your
+own messages; ShotGrid's permissions are still the real gate, this just keeps
+buttons that are certain to fail off the screen.
+
+Notes are read on demand, never polled: **↻ Refresh Notes** reloads the notes
+for the selected version and leaves the version list, filters and selection
+alone. A short cooldown stops a leaning-on-the-button refresh storm.
+
+The publish result page has an **Add publish note** box, so the reason for a
+version gets recorded while it is still fresh — as a real Note on the Version.
+
+## Activity
+
+The Activity tab merges the notes, the replies and the Version's own creation
+into one timeline, newest first. Only events ShotGrid actually recorded; nothing
+is synthesised to pad it out.
+
+## Version compare
+
+From the Version browser: **Compare…**, or right-click a version →
+**Compare ▸ With previous / With latest / Compare With…**. Any two versions, not
+just neighbours. From Needs Attention, **Compare with previous** goes straight
+from a note to what changed.
+
+Four modes: **Side by Side**, **A/B**, **Wipe** (draggable divider), and
+**Difference**. Difference is offered only where it means something — two stills
+of the same resolution — and says why when it is not, rather than showing a black
+frame. It uses Qt's own Difference composition; a per-pixel loop over two 2K
+frames would freeze the window.
+
+Each side takes its media from the first of these it can get: the
+full-resolution file on this machine (`sg_path_to_movie` / `sg_path_to_frames`),
+then the still ShotGrid holds for the version, then nothing. The header says
+which — comparing two ShotGrid thumbnails is useful, but it is not comparing the
+renders, and the window says so rather than letting you assume.
+
+Zoom, fit and actual size apply to both sides at once, so the images stay
+comparable. Differing resolutions are printed side by side and the differing
+metadata rows are highlighted — nothing is silently rescaled.
+
+Movies use the A/B workflow. Frame-accurate synchronised playback is not
+something Qt Multimedia can be relied on for here, and a fragile custom player
+would be worse than an honest A/B switch.
+
+Notes for **both** versions are listed under the media, each labelled with the
+version it belongs to — the point of a compare is to see what changed *and* the
+feedback that caused it. **Publish New Version** from the browser reuses the same
+publish dialog and service, with the task context already filled in.
+
+## Latest version on tasks
+
+The My Tasks table has a **Latest Version** column, filled by a single batched
+query for the whole page — never one query per task. "Latest" is ShotGrid's
+timestamp, not the version name: `v010, v011, v002` is a real publishing order
+and `max(name)` reads it backwards. `config.LATEST_VERSION_FIELD` makes the rule
+configurable for a studio that genuinely numbers in publish order.
+
+Right-click a task → **Latest Version ▸ Open Latest Version** opens the browser
+with that version already selected. A task with nothing published says
+**No Versions** rather than failing quietly.
+
+## Needs Attention
+
+The header button opens the review inbox: what is actually waiting on you.
+
+- a note somebody else left on one of your versions
+- a reply to a note you wrote
+- a version a supervisor rejected or sent back for revision
+
+All of it derived from entities ShotGrid already keeps — no event type is
+invented. Status codes come from `config.REVIEW_STATUS_TYPES`; note that `rev`
+is deliberately absent, since that is the status a fresh publish gets and
+flagging it would mark everything you just published.
+
+The whole inbox is **four queries** regardless of show size, and it is loaded on
+demand and on Refresh — never polled. Clicking an item opens the version it is
+about, selected in the browser, with its notes; you never go looking for it.
+
+Read state is a small JSON file of item ids and timestamps
+(`~/.shotdeck/review_read.json`, `SHOTDECK_REVIEW_STATE`) — ShotGrid has no
+per-user read flag ShotDeck may write, and this is deliberately not a
+notification database. Nothing from ShotGrid is copied into it.
+
+The same review data puts a dot on the task row next to its latest version, and
+the dot carries its reason in the tooltip: *"Sam added a note on
+SH010_Comp_v006, 2h ago"*. A dot that cannot explain itself is noise.
 
 ## Tests
 

@@ -9,13 +9,13 @@ be tested on its own.
 import datetime
 import os
 
-from PySide6.QtCore import Qt, QTimer, QUrl
-from PySide6.QtGui import QAction, QColor
+from PySide6.QtCore import Qt, QTimer, QUrl, QSize
+from PySide6.QtGui import QAction, QColor, QIcon
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QLineEdit,
     QComboBox, QPushButton, QTableWidget, QTableWidgetItem, QHeaderView,
     QAbstractItemView, QFrame, QStackedWidget, QSplitter, QMenu, QApplication,
-    QMessageBox, QSizePolicy,
+    QMessageBox, QSizePolicy, QTabWidget, QWidget, QInputDialog,
 )
 
 import applog
@@ -23,6 +23,8 @@ import config
 import paths
 import version_query
 from . import jobs, theme
+from .notes_panel import NotesPanel, ActivityPanel
+from .version_compare import VersionCompare
 from .widgets import EmptyState, StatusPill, load_thumbnail
 
 log = applog.get()
@@ -76,6 +78,7 @@ class VersionBrowser(QDialog):
         self._jobs = set()
         self._player = None
         self._options_locked = False  # option lists come from the first, unfiltered page
+        self._pending_selection = None   # a version asked for by id
 
         step = (task.get("step") or {}).get("name", "")
         self.setWindowTitle(
@@ -212,7 +215,10 @@ class VersionBrowser(QDialog):
         header.resizeSection(4, 170)
         header.setHighlightSections(False)
         self.table.verticalHeader().hide()
-        self.table.verticalHeader().setDefaultSectionSize(38)
+        # Taller rows than the task table: they carry a thumbnail, and a row of
+        # versions is much easier to read through when you can see them.
+        self.table.verticalHeader().setDefaultSectionSize(46)
+        self.table.setIconSize(QSize(64, 36))
         self.table.setShowGrid(False)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -257,12 +263,29 @@ class VersionBrowser(QDialog):
 
         right = QVBoxLayout()
         right.setSpacing(8)
+
+        # Details, notes and activity share the space rather than fighting for
+        # it: the same tab pattern the main window already uses.
+        self.tabs = QTabWidget()
+        details_page = QWidget()
+        details_lay = QVBoxLayout(details_page)
+        details_lay.setContentsMargins(0, 8, 0, 0)
         self.details = QGridLayout()
         self.details.setHorizontalSpacing(18)
         self.details.setVerticalSpacing(4)
         self.details.setColumnStretch(1, 1)
-        right.addLayout(self.details)
-        right.addStretch()
+        details_lay.addLayout(self.details)
+        details_lay.addStretch()
+        self.tabs.addTab(details_page, "Details")
+
+        self.notes = NotesPanel(self.sg, self.project, self.task)
+        self.tabs.addTab(self.notes, "Notes")
+
+        self.activity = ActivityPanel()
+        self.tabs.addTab(self.activity, "Activity")
+        self.notes.posted.connect(self._refresh_activity)
+        self.notes.loaded.connect(self._refresh_activity)
+        right.addWidget(self.tabs, 1)
 
         actions = QHBoxLayout()
         actions.addStretch()
@@ -271,6 +294,18 @@ class VersionBrowser(QDialog):
         self.play_btn.clicked.connect(self._play)
         self.play_btn.hide()
         actions.addWidget(self.play_btn)
+
+        self.compare_btn = QPushButton("Compare…")
+        self.compare_btn.setObjectName("consoleBtn")
+        self.compare_btn.setEnabled(False)
+        self.compare_btn.clicked.connect(
+            lambda: self._pick_compare(self._selected()))
+        actions.addWidget(self.compare_btn)
+
+        self.publish_btn = QPushButton("Publish New Version")
+        self.publish_btn.setObjectName("consoleBtn")
+        self.publish_btn.clicked.connect(self._publish_new)
+        actions.addWidget(self.publish_btn)
 
         self.open_btn = QPushButton("Open in ShotGrid")
         self.open_btn.setObjectName("consoleBtn")
@@ -390,6 +425,7 @@ class VersionBrowser(QDialog):
 
         self.more_btn.setVisible(self._more)
         self.more_btn.setEnabled(True)
+        self._apply_pending_selection()
         total = len(self._versions)
         self.count_lbl.setText(
             f"{total} version{'s' if total != 1 else ''}"
@@ -417,7 +453,33 @@ class VersionBrowser(QDialog):
                 elif c in (1, 2, 4):
                     item.setForeground(QColor(theme.TEXT_DIM))
                 self.table.setItem(r, c, item)
+            self._load_row_thumbnail(r, v)
         self.table.setUpdatesEnabled(True)
+
+    def _load_row_thumbnail(self, row, version):
+        """A small still beside the version name.
+
+        Cached per URL and shared with the preview and the compare window, so
+        scrolling a long list does not re-download anything.
+        """
+        url = version.get("image") or ""
+        if not url:
+            return
+        target = version["id"]
+
+        def arrived(pixmap):
+            if pixmap.isNull():
+                return
+            item = self.table.item(row, 0)
+            # The list may have been rebuilt by a filter while this was in
+            # flight; only decorate the row if it still holds this version.
+            if not item or row >= len(self._versions) or \
+                    self._versions[row]["id"] != target:
+                return
+            item.setIcon(QIcon(pixmap.scaled(
+                64, 36, Qt.KeepAspectRatio, Qt.SmoothTransformation)))
+
+        load_thumbnail(url, arrived)
 
     # -- selection ---------------------------------------------------------
 
@@ -428,13 +490,43 @@ class VersionBrowser(QDialog):
         r = rows[0].row()
         return self._versions[r] if r < len(self._versions) else None
 
+    def _publish_new(self):
+        """Answer the feedback without leaving the review.
+
+        The same PublishDialog and the same service as everywhere else, with
+        the task context this browser already has — no second publish path.
+        """
+        from .publish_dialog import PublishDialog
+
+        email = getattr(self.parent(), "email", "") or ""
+        dialog = PublishDialog(self.sg, self.project, self.task, email, self)
+        dialog.exec()
+        if dialog.published:
+            self.reload()
+
     def _on_selected(self):
         version = self._selected()
         self.open_btn.setEnabled(bool(version))
+        self.compare_btn.setEnabled(bool(version) and len(self._versions) > 1)
+        self.notes.set_version(version)
         if not version:
+            self.activity.show_events([])
             return
         self._show_details(version)
         self._show_preview(version)
+        self._refresh_activity()
+
+    def _refresh_activity(self):
+        """Rebuild the timeline from whatever notes are already loaded.
+
+        No extra query: the notes panel has just fetched them, and the
+        Version's own creation is already on the row.
+        """
+        version = self._selected()
+        if not version:
+            return
+        self.activity.show_events(
+            self.notes.service.activity(version, self.notes.threads))
 
     def _show_details(self, version):
         while self.details.count():
@@ -552,6 +644,88 @@ class VersionBrowser(QDialog):
 
     # -- actions -----------------------------------------------------------
 
+    def select_version(self, version_id):
+        """Show this version selected, fetching it if it is not on this page.
+
+        Used when arriving from Needs Attention or from Latest Version: the
+        artist asked for one version, so that is what should be in front of
+        them, not a list to search.
+        """
+        self._pending_selection = version_id
+        self._apply_pending_selection()
+
+    def _apply_pending_selection(self):
+        version_id = getattr(self, "_pending_selection", None)
+        if not version_id:
+            return False
+        for row, version in enumerate(self._versions):
+            if version["id"] == version_id:
+                self.table.selectRow(row)
+                self._pending_selection = None
+                return True
+        return False
+
+    def _add_compare_actions(self, menu, version):
+        sub = QMenu("Compare", menu)
+        menu.addMenu(sub)
+
+        previous = self._previous_version(version)
+        act = QAction(f"With previous ({previous.get('code')})" if previous
+                      else "With previous", sub)
+        act.setEnabled(bool(previous))
+        act.triggered.connect(
+            lambda _=False, a=version, b=previous: self._compare(a, b))
+        sub.addAction(act)
+
+        latest = self._versions[0] if self._versions else None
+        act = QAction(f"With latest ({latest.get('code')})" if latest
+                      else "With latest", sub)
+        act.setEnabled(bool(latest) and latest["id"] != version["id"])
+        act.triggered.connect(
+            lambda _=False, a=latest, b=version: self._compare(a, b))
+        sub.addAction(act)
+
+        sub.addSeparator()
+        pick = QAction("Compare With…", sub)
+        pick.triggered.connect(lambda _=False, v=version: self._pick_compare(v))
+        pick.setEnabled(len(self._versions) > 1)
+        sub.addAction(pick)
+        return sub
+
+    def _previous_version(self, version):
+        """The one published before it, by the same rule as Latest Version."""
+        field = config.LATEST_VERSION_FIELD
+        mine = version.get(field)
+        best = None
+        for other in self._versions:
+            if other["id"] == version["id"]:
+                continue
+            theirs = other.get(field)
+            if mine is None or theirs is None or not theirs < mine:
+                continue
+            if best is None or theirs > best.get(field):
+                best = other
+        return best
+
+    def _compare(self, version_a, version_b):
+        if not version_a or not version_b:
+            return
+        VersionCompare(self.sg, self.project, version_a, version_b,
+                       versions=self._versions, parent=self).exec()
+
+    def _pick_compare(self, version):
+        """Any version on the list, not just the neighbouring one."""
+        others = [v for v in self._versions if v["id"] != version["id"]]
+        if not others:
+            return
+        labels = [f"{v.get('code')}  ·  {_when(v.get('created_at'))}"
+                  for v in others]
+        choice, ok = QInputDialog.getItem(
+            self, "Compare With", f"Compare {version.get('code')} with:",
+            labels, 0, False)
+        if ok and choice in labels:
+            self._compare(version, others[labels.index(choice)])
+
     def _context_menu(self, pos):
         index = self.table.indexAt(pos)
         if not index.isValid() or index.row() >= len(self._versions):
@@ -563,6 +737,12 @@ class VersionBrowser(QDialog):
         open_act = QAction("Open in ShotGrid", menu)
         open_act.triggered.connect(self._open_in_shotgrid)
         menu.addAction(open_act)
+        self._add_compare_actions(menu, version)
+
+        publish = QAction("Publish New Version…", menu)
+        publish.triggered.connect(self._publish_new)
+        menu.addAction(publish)
+        menu.addSeparator()
 
         path = version.get("sg_path_to_movie") or \
             version.get("sg_path_to_frames") or ""

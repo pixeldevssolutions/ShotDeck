@@ -193,6 +193,32 @@ QComboBox QAbstractItemView {{
 #warnText {{ color: {WARN}; font-size: 12px; }}
 #errorText {{ color: {ERROR}; font-size: 12px; }}
 
+/* ---- notes ---- */
+#noteCard {{
+    background: {SURFACE}; border: 1px solid {BORDER};
+    border-left: 2px solid {ACCENT_SUNK}; border-radius: {RADIUS_SM}px;
+}}
+#replyCard {{
+    background: {SURFACE_SUNK}; border: 1px solid {BORDER};
+    border-left: 2px solid {BORDER_HI}; border-radius: {RADIUS_SM}px;
+}}
+#noteSubject {{ color: {TEXT}; font-weight: 600; font-size: 12px; }}
+#noteBody {{ color: {TEXT_DIM}; font-size: 12px; }}
+#roleChip {{
+    background: {SURFACE_HI}; color: {TEXT_FAINT}; border: 1px solid {BORDER};
+    border-radius: 3px; padding: 1px 6px; font-size: 9px;
+    font-weight: 700; letter-spacing: 0.6px;
+}}
+
+/* ---- preflight ---- */
+#checkOk {{ color: {OK}; font-size: 12px; }}
+#checkWarn {{ color: {WARN}; font-size: 12px; }}
+#checkError {{ color: {ERROR}; font-size: 12px; }}
+#checkSection {{
+    color: {TEXT_FAINT}; font-size: 10px; font-weight: 700;
+    letter-spacing: 0.6px;
+}}
+
 /* ---- drop zone ---- */
 #dropZone {{
     background: {SURFACE}; border: 1px dashed {BORDER_HI};

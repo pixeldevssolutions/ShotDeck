@@ -21,6 +21,7 @@ import time
 import applog
 import config
 import media_inspector
+import preflight
 
 log = applog.get()
 
@@ -65,8 +66,29 @@ class ConnectionFailed(PublishError):
     title = "ShotGrid unavailable"
 
 
+class PathRejected(PublishError):
+    title = "Media path rejected"
+
+
+class WarningsNotAccepted(PublishError):
+    title = "Publish needs confirming"
+
+
 class PublishCancelled(PublishError):
     title = "Publish cancelled"
+
+
+# Which finding maps to which error, so a preflight failure arrives at the
+# dialog as the same kind of thing an API failure would.
+_FINDING_ERRORS = {
+    "no_project": ContextError, "no_task": ContextError,
+    "no_entity": ContextError,
+    "no_media": MediaError, "missing": MediaError, "unreadable": MediaError,
+    "empty": MediaError, "unsupported": MediaError, "mismatch": MediaError,
+    "wrong_project": PathRejected, "outside_project": PathRejected,
+    "local_scratch": PathRejected,
+    "duplicate": DuplicateVersionError, "no_name": PublishError,
+}
 
 
 def friendly(error, stage=""):
@@ -106,23 +128,29 @@ class PublishRequest:
     """Everything the artist chose, in one object."""
 
     def __init__(self, project, task, name, media_path, description="",
-                 work_file=""):
+                 work_file="", accepted_warnings=False, note=""):
         self.project = project
         self.task = task
         self.name = (name or "").strip()
         self.media_path = media_path or ""
         self.description = (description or "").strip()
         self.work_file = work_file or ""
+        # The artist pressed "Continue anyway" on a warning. Carried into the
+        # service rather than left in the dialog, so the decision is checked
+        # where the publish actually happens.
+        self.accepted_warnings = bool(accepted_warnings)
+        self.note = (note or "").strip()
 
 
 class PublishResult:
     def __init__(self, version, media_info=None, elapsed=0.0,
-                 work_file_note="", work_file_error=""):
+                 work_file_note="", work_file_error="", note_error=""):
         self.version = version
         self.media_info = media_info
         self.elapsed = elapsed
         self.work_file_note = work_file_note
         self.work_file_error = work_file_error
+        self.note_error = note_error
 
     @property
     def id(self):
@@ -144,6 +172,20 @@ class PublishService:
 
     def __init__(self, sg):
         self.sg = sg
+
+    # -- preflight -------------------------------------------------------
+
+    def preflight(self, request, policy=None, check_name=True):
+        """Everything that must hold before ShotGrid is touched.
+
+        Run by the dialog as the artist picks a file, and again here at the
+        top of `publish()`. The second run is not redundant: the dialog may
+        have been open for an hour, and files move, get overwritten and get
+        unmounted. Client-side validation is a courtesy, not a guarantee.
+        """
+        return preflight.run(
+            self.sg, request.project, request.task, request.name,
+            request.media_path, policy=policy, check_name=check_name)
 
     # -- validation ------------------------------------------------------
 
@@ -244,9 +286,16 @@ class PublishService:
                 "Publish cancelled." + (" The part-made Version was removed."
                                         if version else ""))
 
-        self.validate_context(request.project, request.task)
-        say("Validating media…")
-        info = self.inspect_media(request.media_path)
+        say("Running preflight…")
+        report = self.preflight(request)
+        _raise_for(report)
+        if report.warnings and not request.accepted_warnings:
+            # The dialog shows warnings and asks; a caller that skipped that
+            # step does not get to publish past them by accident.
+            raise WarningsNotAccepted(
+                "This publish has warnings that were not confirmed:\n\n"
+                + "\n\n".join(w.message for w in report.warnings))
+        info = report.media_info
 
         task = request.task
         entity = (task.get("entity") or {})
@@ -259,7 +308,6 @@ class PublishService:
               size=info.size, kind=info.kind)
 
         stop_if_cancelled()
-        self.check_name_available(request.project, task, request.name)
 
         say(f"Creating Version {request.name}…")
         try:
@@ -311,12 +359,25 @@ class PublishService:
                 log.warning("work file not registered: %s", e)
                 error = str(e)
 
+        note_error = ""
+        if request.note:
+            say("Posting note…")
+            try:
+                self.sg.create_note(request.project, version, request.note,
+                                    task=task)
+            except Exception as e:
+                # Same reasoning as the work file: the Version is published,
+                # and a note that did not post is worth saying, not worth
+                # calling the publish failed.
+                log.warning("publish note not posted: %s", e)
+                note_error = str(e)
+
         elapsed = time.time() - started
         audit("finished", version=version["id"], version_name=request.name,
               seconds=round(elapsed, 1), work_file=bool(request.work_file),
               work_file_ok=not error)
         say("Done")
-        return PublishResult(version, info, elapsed, note, error)
+        return PublishResult(version, info, elapsed, note, error, note_error)
 
     def _cleanup(self, version):
         """Remove a Version that never got its media."""
@@ -333,6 +394,15 @@ class PublishService:
 
 
 # -- helpers ----------------------------------------------------------------
+
+def _raise_for(report):
+    """Turn the first blocking finding into the right kind of PublishError."""
+    if report.passed:
+        return
+    finding = report.errors[0]
+    error_type = _FINDING_ERRORS.get(finding.code, PublishError)
+    raise error_type(finding.message, finding.detail)
+
 
 def next_version_name(task, existing):
     """The next <entity>_<step>_v### for this task.

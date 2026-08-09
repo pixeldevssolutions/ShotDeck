@@ -95,6 +95,46 @@ def test_steps_are_cached_too():
     assert len([c for c in sg.calls if c[0] == "find" and c[1] == "Step"]) == 1
 
 
+def test_optional_version_fields_are_probed_not_assumed():
+    """One field a site does not have fails the whole find(), which reads as
+    'the version browser is broken'."""
+    sg = fakes.FakeShotgun()
+    client = fakes.client(sg)
+
+    def schema_field_read(entity_type, field):
+        if field == "frame_count":
+            raise RuntimeError("Version.frame_count does not exist")
+        return {field: {"properties": {}}}
+
+    sg.schema_field_read = schema_field_read
+    fields = client._version_fields()
+    assert "frame_count" not in fields
+    assert "sg_path_to_movie" in fields
+    assert "code" in fields
+
+
+def test_a_version_query_that_fails_on_fields_retries_with_the_core_set():
+    sg = fakes.FakeShotgun()
+    client = fakes.client(sg)
+    sg.add_version("SH010_Comp_v001")
+
+    original = sg.find
+    calls = {"n": 0}
+
+    def find(entity_type, filters, fields=None, **kwargs):
+        if entity_type == "Version":
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("API read() Version.frame_range doesn't "
+                                   "exist")
+        return original(entity_type, filters, fields, **kwargs)
+
+    sg.find = find
+    rows = client.versions(entity=fakes.SHOT)
+    assert rows and rows[0]["code"] == "SH010_Comp_v001"
+    assert calls["n"] == 2, "it should have retried once, with fewer fields"
+
+
 def test_status_list_failure_degrades_to_empty():
     sg = fakes.FakeShotgun()
 

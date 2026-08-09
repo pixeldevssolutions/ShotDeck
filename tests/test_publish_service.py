@@ -28,6 +28,11 @@ def service(sg=None):
 
 
 def request(name="SH010_Comp_v004", media=MOV, **kw):
+    # These fixtures live in the OS temp directory, which the path policy
+    # warns about — correctly. The warning is accepted here so these tests
+    # exercise the publish rather than the path policy; test_path_validator
+    # and test_preflight cover the policy itself.
+    kw.setdefault("accepted_warnings", True)
     return ps.PublishRequest(fakes.PROJECT, fakes.TASK, name, media, **kw)
 
 
