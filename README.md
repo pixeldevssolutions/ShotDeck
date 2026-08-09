@@ -1,4 +1,4 @@
-# PixelDesk — ShotGrid Desktop clone
+# PixelDesk — Custom ShotGrid Desktop 
 
 Project picker → per-project app launcher → launches DCCs on Rocky Linux with
 project-level environment injected → "My Tasks" tab filtered by the studio's
