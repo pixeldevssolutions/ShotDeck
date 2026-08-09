@@ -70,6 +70,7 @@ class SGClient:
         self._version_statuses = None    # Version statuses
         self._steps = None               # pipeline steps, aka departments
         self._version_field_cache = None
+        self._optional_fields = []       # the ones this site turned out to have
         self._users = {}                 # id -> HumanUser, for note authors
 
     @property
@@ -240,12 +241,24 @@ class SGClient:
         if task_id:
             found.append([config.VERSION_TASK_FIELD, "is",
                           {"type": "Task", "id": task_id}])
-        return self.sg.find(
-            "Version", found, fields or self._version_fields(),
-            order=order or [{"field_name": "created_at",
-                             "direction": "desc"}],
-            limit=limit, page=page,
-        )
+        order = order or [{"field_name": "created_at", "direction": "desc"}]
+        try:
+            return self.sg.find(
+                "Version", found, fields or self._version_fields(),
+                order=order, limit=limit, page=page)
+        except Exception as e:
+            if fields or not self._optional_fields:
+                raise
+            # A field this site does not have fails the whole query. Rather
+            # than leaving the browser looking broken, drop the optional ones
+            # and carry on with less detail.
+            log.warning("version query failed with the optional fields (%s); "
+                        "retrying with the core fields only", e)
+            self._optional_fields = []
+            self._version_field_cache = list(config.VERSION_FIELDS)
+            return self.sg.find(
+                "Version", found, self._version_field_cache,
+                order=order, limit=limit, page=page)
 
     def _version_fields(self):
         """VERSION_FIELDS, plus any optional field this site turns out to have.
@@ -257,10 +270,12 @@ class SGClient:
             return self._version_field_cache
 
         fields = list(config.VERSION_FIELDS)
+        self._optional_fields = []
         for name in config.VERSION_OPTIONAL_FIELDS:
             try:
                 if self.sg.schema_field_read("Version", name):
                     fields.append(name)
+                    self._optional_fields.append(name)
             except Exception as e:
                 log.info("Version.%s not available on this site (%s)", name, e)
         self._version_field_cache = fields

@@ -54,7 +54,16 @@ def is_movie(version):
 
 
 class VersionMedia:
-    """One side of the comparison, and what it managed to load."""
+    """One side of the comparison, and what it managed to load.
+
+    Three sources, in order of how much they are worth: the full-res media on
+    this machine, the still ShotGrid holds for the version, and nothing. Most
+    versions on a live site have no local path -- published by other tools, or
+    on a mount this workstation does not have -- so falling back to the
+    thumbnail is the difference between a working compare and two grey panes.
+    """
+
+    LOCAL, THUMBNAIL, NONE = "local", "thumbnail", "none"
 
     def __init__(self, version):
         self.version = version
@@ -62,14 +71,41 @@ class VersionMedia:
         self.pixmap = QPixmap()
         self.info = media_inspector.inspect(self.path) if self.path else None
         self.error = ""
+        self.source = self.NONE
 
         if self.path and config.media_kind(self.path) == "image":
             self.pixmap = QPixmap(self.path)
             if self.pixmap.isNull():
                 self.error = (f"Qt has no reader for "
                               f"{os.path.splitext(self.path)[1]} files")
-        elif not self.path:
-            self.error = "No media readable from this machine"
+            else:
+                self.source = self.LOCAL
+        elif self.path:
+            self.source = self.LOCAL          # a movie, handled by the player
+        else:
+            self.error = "Loading the ShotGrid thumbnail…" \
+                if self.thumbnail_url else \
+                "No media on this machine and no thumbnail in ShotGrid"
+
+    @property
+    def thumbnail_url(self):
+        return self.version.get("image") or ""
+
+    def use_thumbnail(self, pixmap):
+        """Called when the ShotGrid still arrives."""
+        if pixmap.isNull():
+            self.error = "ShotGrid has no usable thumbnail for this version"
+            return False
+        self.pixmap = pixmap
+        self.source = self.THUMBNAIL
+        self.error = ""
+        return True
+
+    @property
+    def source_label(self):
+        return {self.LOCAL: "full-resolution media",
+                self.THUMBNAIL: "ShotGrid thumbnail",
+                self.NONE: "no media"}[self.source]
 
     @property
     def code(self):
@@ -378,9 +414,19 @@ class VersionCompare(QDialog):
         self.media_b = VersionMedia(version_b)
         self.image_view.set_media(self.media_a, self.media_b)
 
+        # Logged because "compare shows nothing" is almost always one of these
+        # two lines saying "none" — the Terminal panel answers it without a
+        # debugging session.
+        log.info("compare %s (%s: %s) with %s (%s: %s)",
+                 self.media_a.code, self.media_a.source,
+                 self.media_a.path or self.media_a.thumbnail_url or "nothing",
+                 self.media_b.code, self.media_b.source,
+                 self.media_b.path or self.media_b.thumbnail_url or "nothing")
+
         self._build_headers()
         self._build_metadata()
         self._load_notes()
+        self._load_thumbnails()
 
         movies = is_movie(version_a) or is_movie(version_b)
         self.stack.setCurrentWidget(self.movie_view if movies
@@ -388,6 +434,24 @@ class VersionCompare(QDialog):
         if movies:
             self._show_movie(False)
         self.set_mode(AB if movies else SIDE_BY_SIDE)
+
+    def _load_thumbnails(self):
+        """Fill either side that has no local media from ShotGrid's still.
+
+        Cached per URL by `widgets.load_thumbnail`, so a version already seen
+        in the browser costs nothing here.
+        """
+        for media in (self.media_a, self.media_b):
+            if media.source != VersionMedia.NONE or not media.thumbnail_url:
+                continue
+
+            def arrived(pixmap, target=media):
+                if target.use_thumbnail(pixmap):
+                    self.image_view.update()
+                    self._build_metadata()
+                    self._build_headers()
+
+            load_thumbnail(media.thumbnail_url, arrived)
 
     def set_mode(self, mode):
         if mode == DIFFERENCE:
@@ -424,9 +488,18 @@ class VersionCompare(QDialog):
             name = QLabel(media.code)
             name.setObjectName("tileName")
             lay.addWidget(name)
-            who = QLabel(_person(media.version))
+            who = QLabel(f"{_person(media.version)}   ·   "
+                         f"{_when(media.version.get('created_at'))}")
             who.setObjectName("tileSub")
             lay.addWidget(who)
+
+            # Say which of the three sources is on screen: comparing two
+            # ShotGrid thumbnails is useful, but it is not the same as
+            # comparing the renders and nobody should have to guess which.
+            source = QLabel(f"Showing {media.source_label}")
+            source.setObjectName("tileSub" if media.source == media.LOCAL
+                                 else "checkWarn")
+            lay.addWidget(source)
             self.headers.addWidget(card)
 
     def _build_metadata(self):

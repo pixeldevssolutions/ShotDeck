@@ -106,18 +106,22 @@ VERSION_STATUS = "rev"
 # off the linked task rather than a second round trip. A field the site does
 # not have makes the whole find() fail, so anything non-stock added here has to
 # exist -- VERSION_OPTIONAL_FIELDS below is the safe place for the rest.
+# Only fields every ShotGrid site has. Anything a site might have renamed or
+# removed belongs in VERSION_OPTIONAL_FIELDS below -- one unknown field fails
+# the entire find(), which reads as "the version browser is broken".
 VERSION_FIELDS = [
     "code", "description", "sg_status_list", "user", "created_by",
     "created_at", "updated_at", "entity", "sg_task", "image",
-    "sg_uploaded_movie", "sg_path_to_movie", "sg_path_to_frames",
-    "sg_first_frame", "sg_last_frame", "frame_count", "frame_range",
     "sg_task.Task.step",
     "sg_task.Task.content",
 ]
 
-# Tried once and dropped for the session if the site does not have them, so a
-# studio-specific field can be listed without risking every query.
-VERSION_OPTIONAL_FIELDS = []
+# Probed once against the schema and kept for the session if the site has them.
+# These are stock fields, but stock is not the same as universal.
+VERSION_OPTIONAL_FIELDS = [
+    "sg_uploaded_movie", "sg_path_to_movie", "sg_path_to_frames",
+    "sg_first_frame", "sg_last_frame", "frame_count", "frame_range",
+]
 
 # Versions fetched per page in the browser. The rest arrive on Load more.
 VERSION_PAGE_SIZE = 100

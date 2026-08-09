@@ -719,6 +719,106 @@ def test_compare_metadata_marks_what_differs():
     assert labels, "a difference between the two columns should be marked"
 
 
+def _seed_thumbnail(url, size=(320, 180), colour="#a78bfa"):
+    """Put an image in the shared thumbnail cache, so nothing is downloaded."""
+    from PySide6.QtCore import QBuffer, QByteArray
+    from ui import widgets
+
+    pm = QPixmap(*size)
+    pm.fill(QColor(colour))
+    data = QByteArray()
+    buffer = QBuffer(data)
+    buffer.open(QBuffer.WriteOnly)
+    pm.save(buffer, "PNG")
+    buffer.close()
+    widgets._thumb_cache[url] = bytes(data.data())
+    return url
+
+
+def test_compare_falls_back_to_the_shotgrid_thumbnail():
+    """Most versions on a live site have no local media path — published by
+    another tool, or on a mount this workstation does not have. Without the
+    thumbnail fallback both panes are empty and compare looks broken."""
+    url_a = _seed_thumbnail("https://sg.example/v006.png")
+    url_b = _seed_thumbnail("https://sg.example/v005.png", colour="#34d399")
+    a = {"id": 1, "code": "SH010_Comp_v006", "image": url_a}
+    b = {"id": 2, "code": "SH010_Comp_v005", "image": url_b}
+
+    dialog = _compare(a, b)
+    assert not dialog.media_a.pixmap.isNull()
+    assert not dialog.media_b.pixmap.isNull()
+    assert dialog.media_a.source == "thumbnail"
+    assert not dialog.media_a.error
+
+
+def test_compare_says_which_source_is_on_screen():
+    url = _seed_thumbnail("https://sg.example/v004.png")
+    a = {"id": 1, "code": "v006", "image": url}
+    b = {"id": 2, "code": "v005", "image": url}
+    dialog = _compare(a, b)
+    assert "ShotGrid thumbnail" in _labels(dialog), \
+        "comparing thumbnails is useful, but must not look like the renders"
+
+
+def test_side_by_side_paints_both_versions():
+    from PySide6.QtGui import QImage, QPainter
+    from ui.version_compare import SIDE_BY_SIDE
+
+    a = _image_version("paint_a", colour="#3d9dff")
+    b = _image_version("paint_b", colour="#f87171")
+    dialog = _compare(a, b)
+    dialog.set_mode(SIDE_BY_SIDE)
+    view = dialog.image_view
+    view.resize(600, 300)
+    settle()
+
+    image = QImage(view.size(), QImage.Format_RGB32)
+    view.render(image)
+    left = image.pixelColor(150, 150)
+    right = image.pixelColor(450, 150)
+    assert left != right, "the two sides should not be painting the same thing"
+    assert QColor("#3d9dff") in (left,) or left.blue() > left.red()
+    assert right.red() > right.blue()
+
+
+def test_wipe_shows_a_of_one_side_and_b_of_the_other():
+    from PySide6.QtGui import QImage
+    from ui.version_compare import WIPE
+
+    a = _image_version("wipe_a", colour="#3d9dff")
+    b = _image_version("wipe_b", colour="#f87171")
+    dialog = _compare(a, b)
+    dialog.set_mode(WIPE)
+    view = dialog.image_view
+    view.resize(600, 300)
+    view.set_wipe(0.5)
+    settle()
+
+    image = QImage(view.size(), QImage.Format_RGB32)
+    view.render(image)
+    assert image.pixelColor(100, 150).blue() > image.pixelColor(100, 150).red()
+    assert image.pixelColor(500, 150).red() > image.pixelColor(500, 150).blue()
+
+
+def test_thumbnails_appear_beside_versions_in_the_list():
+    url = _seed_thumbnail("https://sg.example/row.png")
+    sg = fakes.FakeShotgun()
+    sg.add_version("SH010_Comp_v001", image=url)
+    browser = _browser(sg)
+    settle()
+    assert not browser.table.item(0, 0).icon().isNull(), \
+        "the version list should show the version"
+
+
+def test_a_version_with_no_thumbnail_still_lists():
+    sg = fakes.FakeShotgun()
+    sg.add_version("SH010_Comp_v001", image=None)
+    browser = _browser(sg)
+    settle()
+    assert browser.table.item(0, 0).text() == "SH010_Comp_v001"
+    assert browser.table.item(0, 0).icon().isNull()
+
+
 # -- integration -----------------------------------------------------------
 
 def test_browser_compare_menu_offers_previous_latest_and_pick():

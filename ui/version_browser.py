@@ -9,8 +9,8 @@ be tested on its own.
 import datetime
 import os
 
-from PySide6.QtCore import Qt, QTimer, QUrl
-from PySide6.QtGui import QAction, QColor
+from PySide6.QtCore import Qt, QTimer, QUrl, QSize
+from PySide6.QtGui import QAction, QColor, QIcon
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QLineEdit,
     QComboBox, QPushButton, QTableWidget, QTableWidgetItem, QHeaderView,
@@ -215,7 +215,10 @@ class VersionBrowser(QDialog):
         header.resizeSection(4, 170)
         header.setHighlightSections(False)
         self.table.verticalHeader().hide()
-        self.table.verticalHeader().setDefaultSectionSize(38)
+        # Taller rows than the task table: they carry a thumbnail, and a row of
+        # versions is much easier to read through when you can see them.
+        self.table.verticalHeader().setDefaultSectionSize(46)
+        self.table.setIconSize(QSize(64, 36))
         self.table.setShowGrid(False)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -450,7 +453,33 @@ class VersionBrowser(QDialog):
                 elif c in (1, 2, 4):
                     item.setForeground(QColor(theme.TEXT_DIM))
                 self.table.setItem(r, c, item)
+            self._load_row_thumbnail(r, v)
         self.table.setUpdatesEnabled(True)
+
+    def _load_row_thumbnail(self, row, version):
+        """A small still beside the version name.
+
+        Cached per URL and shared with the preview and the compare window, so
+        scrolling a long list does not re-download anything.
+        """
+        url = version.get("image") or ""
+        if not url:
+            return
+        target = version["id"]
+
+        def arrived(pixmap):
+            if pixmap.isNull():
+                return
+            item = self.table.item(row, 0)
+            # The list may have been rebuilt by a filter while this was in
+            # flight; only decorate the row if it still holds this version.
+            if not item or row >= len(self._versions) or \
+                    self._versions[row]["id"] != target:
+                return
+            item.setIcon(QIcon(pixmap.scaled(
+                64, 36, Qt.KeepAspectRatio, Qt.SmoothTransformation)))
+
+        load_thumbnail(url, arrived)
 
     # -- selection ---------------------------------------------------------
 

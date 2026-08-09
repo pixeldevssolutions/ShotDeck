@@ -249,6 +249,10 @@ Right-click a task → **Versions → View Versions…** to see what has already
 published on that shot or asset. The scope switch at the top narrows it to the
 one task.
 
+Each row carries a small thumbnail beside the version name, from the same cache
+the tiles and the compare window use, so scrolling a long list downloads nothing
+twice.
+
 Filtering is done by ShotGrid, not in the client: department, artist, status,
 date range and the search box all become query filters (`version_query.py`),
 and results arrive `config.VERSION_PAGE_SIZE` at a time with a Load more button.
@@ -306,6 +310,12 @@ Four modes: **Side by Side**, **A/B**, **Wipe** (draggable divider), and
 of the same resolution — and says why when it is not, rather than showing a black
 frame. It uses Qt's own Difference composition; a per-pixel loop over two 2K
 frames would freeze the window.
+
+Each side takes its media from the first of these it can get: the
+full-resolution file on this machine (`sg_path_to_movie` / `sg_path_to_frames`),
+then the still ShotGrid holds for the version, then nothing. The header says
+which — comparing two ShotGrid thumbnails is useful, but it is not comparing the
+renders, and the window says so rather than letting you assume.
 
 Zoom, fit and actual size apply to both sides at once, so the images stay
 comparable. Differing resolutions are printed side by side and the differing
