@@ -94,6 +94,8 @@ class TasksTable(QWidget):
     task_selected = Signal(object)          # the Task dict, or None
     package_launched = Signal(object, str, str)   # task, package, version
     folder_requested = Signal(str)                # absolute path to open
+    status_change_requested = Signal(object, str)
+    publish_requested = Signal(object)  # task, new status code
 
     def __init__(self):
         super().__init__()
@@ -101,6 +103,7 @@ class TasksTable(QWidget):
         self._rows = []              # row index -> task dict, after filtering
         self._packages = []          # [(package, [versions]), ...] from disk
         self._project = None         # needed to build folder paths
+        self._statuses = []          # [(code, label), ...] from the SG schema
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(24, 16, 24, 16)
@@ -195,6 +198,11 @@ class TasksTable(QWidget):
         header.setEnabled(False)
         menu.addSeparator()
 
+        self._add_publish_actions(menu, task)
+        menu.addSeparator()
+
+        self._add_status_actions(menu, task)
+        menu.addSeparator()
         self._add_folder_actions(menu, task)
         menu.addSeparator()
 
@@ -214,7 +222,8 @@ class TasksTable(QWidget):
                     self.package_launched.emit(task, p, v))
                 menu.addAction(act)
                 continue
-            sub = menu.addMenu(label)
+            sub = QMenu(label, menu)
+            menu.addMenu(sub)
             for i, version in enumerate(versions):
                 text = version + ("   (latest)" if i == 0 else "")
                 act = QAction(text, sub)
@@ -224,6 +233,50 @@ class TasksTable(QWidget):
                 sub.addAction(act)
 
         menu.exec(self.table.viewport().mapToGlobal(pos))
+
+    def _add_publish_actions(self, menu, task):
+        sub = QMenu("Publish", menu)
+        menu.addMenu(sub)
+        act = QAction("Standalone Publish…", sub)
+        act.setToolTip("Upload a movie or image to ShotGrid as a Version, "
+                       "without opening a DCC")
+        act.triggered.connect(
+            lambda _=False, t=task: self.publish_requested.emit(t))
+        sub.addAction(act)
+        return sub
+
+    def _add_status_actions(self, menu, task):
+        """Set status submenu, with the task's current status ticked."""
+        # Built with an explicit parent rather than menu.addMenu("..."), whose
+        # return value PySide can collect out from under us.
+        sub = QMenu("Set status", menu)
+        menu.addMenu(sub)
+        if not self._statuses:
+            act = sub.addAction("Status list unavailable")
+            act.setEnabled(False)
+            return
+
+        current = (task.get("sg_status_list") or "").lower()
+        for code, label in self._statuses:
+            act = QAction(f"{label}  ({code})", sub)
+            act.setCheckable(True)
+            act.setChecked(code.lower() == current)
+            act.setEnabled(code.lower() != current)
+            act.triggered.connect(
+                lambda _=False, t=task, c=code:
+                self.status_change_requested.emit(t, c))
+            sub.addAction(act)
+
+    def set_statuses(self, statuses):
+        self._statuses = statuses or []
+
+    def update_task(self, task_id, code):
+        """Reflect a status write without refetching the whole task list."""
+        for t in self._tasks:
+            if t["id"] == task_id:
+                t["sg_status_list"] = code
+                break
+        self._rebuild()
 
     def _add_folder_actions(self, menu, task):
         entries = paths.folders(self._project, task) if self._project else []
@@ -242,7 +295,8 @@ class TasksTable(QWidget):
             lambda _=False, p=root_path: self.folder_requested.emit(p))
         menu.addAction(root_act)
 
-        sub = menu.addMenu("Open folder")
+        sub = QMenu("Open folder", menu)
+        menu.addMenu(sub)
         for label, path, exists in entries[1:]:
             act = QAction(label, sub)
             act.setToolTip(path)
@@ -299,6 +353,8 @@ class SoftwarePage(QWidget):
     task_selected = Signal(object)
     package_launched = Signal(object, str, str)
     folder_requested = Signal(str)
+    status_change_requested = Signal(object, str)
+    publish_requested = Signal(object)
 
     def __init__(self):
         super().__init__()
@@ -325,9 +381,17 @@ class SoftwarePage(QWidget):
         self.tasks.task_selected.connect(self.task_selected)
         self.tasks.package_launched.connect(self.package_launched)
         self.tasks.folder_requested.connect(self.folder_requested)
+        self.tasks.status_change_requested.connect(self.status_change_requested)
+        self.tasks.publish_requested.connect(self.publish_requested)
 
     def set_project(self, project):
         self.tasks.set_project(project)
+
+    def set_statuses(self, statuses):
+        self.tasks.set_statuses(statuses)
+
+    def update_task_status(self, task_id, code):
+        self.tasks.update_task(task_id, code)
 
     def set_software(self, softwares):
         self.apps.set_software(softwares)

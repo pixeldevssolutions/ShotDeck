@@ -1,3 +1,4 @@
+import datetime
 import urllib.request
 
 from PySide6.QtCore import (
@@ -5,6 +6,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import (
     QPixmap, QPainter, QColor, QLinearGradient, QBrush, QFont, QPainterPath,
+    QPalette,
 )
 from PySide6.QtWidgets import (
     QFrame, QLabel, QVBoxLayout, QHBoxLayout, QSizePolicy, QWidget,
@@ -251,11 +253,10 @@ class DueDate(QStyledItemDelegate):
 
     def initStyleOption(self, option, index):
         super().initStyleOption(option, index)
-        import datetime
+        role = QPalette.ColorRole.Text
         raw = (index.data(Qt.DisplayRole) or "").strip()
         if not raw:
-            option.palette.setColor(option.palette.Text,
-                                    QColor(theme.TEXT_FAINT))
+            option.palette.setColor(role, QColor(theme.TEXT_FAINT))
             return
         try:
             due = datetime.date.fromisoformat(raw)
@@ -263,9 +264,9 @@ class DueDate(QStyledItemDelegate):
             return
         today = datetime.date.today()
         if due < today:
-            option.palette.setColor(option.palette.Text, QColor(theme.ERROR))
+            option.palette.setColor(role, QColor(theme.ERROR))
         elif (due - today).days <= 2:
-            option.palette.setColor(option.palette.Text, QColor(theme.WARN))
+            option.palette.setColor(role, QColor(theme.WARN))
 
 
 STYLE = theme.STYLE

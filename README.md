@@ -84,6 +84,22 @@ rez release .                 # installs to /software/packages (set in rez confi
 `rez/shotdeck_context/` in this repository is a working example of that layout —
 build and release it once, and every DCC launched by ShotDeck can import it.
 
+## Standalone publish
+
+Right-click a task → **Publish → Standalone Publish…** to upload a movie or
+image to ShotGrid as a Version without opening a DCC. The dialog shows the
+project, entity, task and user being published against, suggests the next
+`<entity>_<step>_v###` name, previews the media, and takes an optional
+description.
+
+It creates a Version linked to the task and uploads the media to
+`sg_uploaded_movie`; stills also get a thumbnail. The field names are all
+configurable in `config.py` (`VERSION_TASK_FIELD`, `VERSION_ENTITY_FIELD`,
+`VERSION_MEDIA_FIELD`, `VERSION_STATUS`).
+
+The ShotGrid script user needs permission to create Versions and upload to the
+media field.
+
 ## Publish context inside the DCC
 
 Every launch writes a JSON context file and exports `SHOTDECK_CONTEXT_FILE`

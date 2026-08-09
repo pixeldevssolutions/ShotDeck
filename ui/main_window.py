@@ -4,13 +4,14 @@ from PySide6.QtCore import Qt, QThreadPool, QRunnable, QObject, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QStackedWidget, QMessageBox, QSplitter,
+    QPushButton, QStackedWidget, QMessageBox, QSplitter, QDialog,
 )
 
 import applog, config, launcher, paths
 from .widgets import STYLE, Avatar
 from .console import ConsolePanel
 from .project_page import ProjectPage
+from .publish_dialog import PublishDialog
 from .software_page import SoftwarePage
 
 log = applog.get()
@@ -43,6 +44,7 @@ class MainWindow(QMainWindow):
         self.project = None
         self.task = None          # Task an app will be launched against
         self.pool = QThreadPool.globalInstance()
+        self._jobs = set()        # in-flight workers, see _run()
 
         self.setWindowTitle(config.APP_TITLE)
         self.resize(1080, 720)
@@ -136,6 +138,8 @@ class MainWindow(QMainWindow):
         self.software_page.task_selected.connect(self._on_task_selected)
         self.software_page.package_launched.connect(self.launch_package)
         self.software_page.folder_requested.connect(self.open_folder)
+        self.software_page.status_change_requested.connect(self.set_task_status)
+        self.software_page.publish_requested.connect(self.publish_version)
 
         self.statusBar().showMessage("Connecting to ShotGrid...")
         self._run(self._bootstrap, self._on_bootstrap)
@@ -158,11 +162,25 @@ class MainWindow(QMainWindow):
 
     # -- async helper ------------------------------------------------------
 
-    def _run(self, fn, on_result, *args):
+    def _run(self, fn, on_result, *args, on_error=None):
+        """Run fn on the thread pool and hand the result back on the UI thread.
+
+        The worker is kept in _jobs until it finishes: QThreadPool takes the
+        C++ object, but nothing holds the Python side, and a collected wrapper
+        takes its signals with it — the callbacks then never fire.
+        """
         worker = _Worker(fn, *args)
+        self._jobs.add(worker)
+
+        def finished(*_):
+            self._jobs.discard(worker)
+
         worker.signals.result.connect(on_result)
+        worker.signals.result.connect(finished)
         worker.signals.error.connect(
-            lambda msg: QMessageBox.critical(self, "ShotGrid", msg))
+            on_error or
+            (lambda msg: QMessageBox.critical(self, "ShotGrid", msg)))
+        worker.signals.error.connect(finished)
         self.pool.start(worker)
 
     # -- data --------------------------------------------------------------
@@ -170,10 +188,12 @@ class MainWindow(QMainWindow):
     def _bootstrap(self):
         owner = self.sg.resolve_owner(self.email)
         projects = self.sg.active_projects()
-        return owner, projects
+        statuses = self.sg.task_statuses()
+        return owner, projects, statuses
 
     def _on_bootstrap(self, result):
-        owner, projects = result
+        owner, projects, statuses = result
+        self.software_page.set_statuses(statuses)
         if not owner and config.TASK_OWNER_IS_ENTITY:
             self.statusBar().showMessage(
                 f"No {config.TASK_OWNER_ENTITY} found with "
@@ -256,6 +276,50 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             f"Launched {software['code']} (pid {pid}) "
             f"in {self.project['name']} {where} — see Terminal for output")
+
+    def publish_version(self, task):
+        """Standalone publish: upload media as a Version against this task."""
+        self.task = task
+        self.software_page.set_task(task)
+        log.info("standalone publish for task %s (%s)",
+                 task["id"], task.get("content", ""))
+
+        dialog = PublishDialog(self.sg, self.project, task, self.email, self)
+        if dialog.exec() == QDialog.Accepted:
+            version = getattr(dialog, "published", None)
+            if version:
+                self.statusBar().showMessage(
+                    f"Published Version {version.get('code') or version['id']} "
+                    f"to '{task.get('content', '')}'")
+
+    def set_task_status(self, task, code):
+        """Write a status change back to ShotGrid, off the UI thread."""
+        task_id = task["id"]
+        old = task.get("sg_status_list") or ""
+        self.statusBar().showMessage(
+            f"Setting '{task.get('content', '')}' to {code}…")
+        # Show it straight away; put it back if the write fails.
+        self.software_page.update_task_status(task_id, code)
+
+        def write():
+            self.sg.set_task_status(task_id, code)
+            return task_id, code
+
+        def done(result):
+            _, new_code = result
+            self.statusBar().showMessage(
+                f"'{task.get('content', '')}' is now {new_code}")
+
+        def failed(msg):
+            log.error("could not set status on task %s: %s", task_id, msg)
+            self.software_page.update_task_status(task_id, old)
+            self.show_console()
+            QMessageBox.warning(
+                self, "Status not changed",
+                f"ShotGrid rejected the change:\n\n{msg}\n\n"
+                f"The task is still {old or 'unset'}.")
+
+        self._run(write, done, on_error=failed)
 
     def open_folder(self, path):
         try:

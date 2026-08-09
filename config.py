@@ -89,6 +89,25 @@ SOFTWARE_REZ_FIELD = "sg_rez_packages"
 # shotdeck_context`. Set to "" to stop injecting it.
 REZ_CONTEXT_PACKAGE = "shotdeck_context"
 
+# -- standalone publish ----------------------------------------------------
+
+# Field on Version linking it back to the Task. Stock ShotGrid uses sg_task.
+VERSION_TASK_FIELD = "sg_task"
+# Field linking the Version to the Shot or Asset.
+VERSION_ENTITY_FIELD = "entity"
+# Field the media is uploaded to. This is what the SG player streams.
+VERSION_MEDIA_FIELD = "sg_uploaded_movie"
+# Status a freshly published Version gets. "" leaves it at the site default.
+VERSION_STATUS = "rev"
+
+# Extensions treated as movies rather than stills.
+MOVIE_EXTENSIONS = {
+    ".mov", ".mp4", ".mxf", ".avi", ".mkv", ".webm", ".m4v", ".r3d",
+}
+IMAGE_EXTENSIONS = {
+    ".jpg", ".jpeg", ".png", ".tif", ".tiff", ".exr", ".dpx", ".tga", ".bmp",
+}
+
 # rez entry point. Set SHOTDECK_REZ_EXECUTABLE to an absolute path when the
 # artist's login shell does not put rez on PATH.
 REZ_EXECUTABLE = os.environ.get("SHOTDECK_REZ_EXECUTABLE", "rez")
