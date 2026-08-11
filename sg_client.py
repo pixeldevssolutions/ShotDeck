@@ -674,6 +674,18 @@ class SGClient:
     # -- queries -----------------------------------------------------------
 
     def my_tasks(self, project, statuses=None):
+        return self._my_tasks(project=project, statuses=statuses)
+
+    def all_my_tasks(self, statuses=None):
+        """Every task assigned to this artist, across all projects.
+
+        One query, for the header's search. The result is the artist's own
+        workload rather than the site's, so it stays small enough to hold and
+        to match against as they type.
+        """
+        return self._my_tasks(project=None, statuses=statuses)
+
+    def _my_tasks(self, project=None, statuses=None):
         if config.TASK_OWNER_IS_ENTITY:
             if not self._owner:
                 return []
@@ -689,10 +701,10 @@ class SGClient:
                 config.TASK_OWNER_STRING_OP,
                 self._owner_value,
             ]
-        filters = [
-            ["project", "is", {"type": "Project", "id": project["id"]}],
-            owner_filter,
-        ]
+        filters = [owner_filter]
+        if project:
+            filters.insert(
+                0, ["project", "is", {"type": "Project", "id": project["id"]}])
         if statuses:
             filters.append(["sg_status_list", "in", statuses])
         return self.sg.find(

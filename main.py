@@ -43,7 +43,7 @@ def main():
         QMessageBox.critical(None, "ShotDeck", str(e))
         return 1
 
-    win = MainWindow(sg, login=result.login)
+    win = MainWindow(sg, login=result.login, auth_result=result)
     if args.console:
         win.show_console()
     win.show()

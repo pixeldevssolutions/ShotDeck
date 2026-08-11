@@ -1,6 +1,8 @@
 import datetime
 import urllib.request
 
+import shiboken6
+
 from PySide6.QtCore import (
     Qt, QSize, Signal, QThreadPool, QRunnable, QObject, QRectF,
 )
@@ -43,6 +45,23 @@ class _ThumbJob(QRunnable):
 _thumb_jobs = set()          # see ui/jobs.py for why these are held
 
 
+def _deliver(callback, data):
+    """Hand the decoded pixmap to the callback, on the UI thread.
+
+    A thumbnail arriving after its window closed is normal: the widget the
+    callback writes to is already gone and Qt raises RuntimeError from the
+    dead wrapper. Swallowing it here keeps a closed dialog from taking the
+    process with it, and a thumbnail is never worth an error dialog.
+    """
+    pm = QPixmap()
+    if not pm.loadFromData(data):
+        return
+    try:
+        callback(pm)
+    except RuntimeError:
+        pass
+
+
 def load_thumbnail(url, callback):
     """Call `callback(QPixmap)` with the image at `url`, cached per URL.
 
@@ -53,9 +72,7 @@ def load_thumbnail(url, callback):
         return
     data = _thumb_cache.get(url)
     if data is not None:
-        pm = QPixmap()
-        pm.loadFromData(data)
-        callback(pm)
+        _deliver(callback, data)
         return
 
     job = _ThumbJob(url)
@@ -64,9 +81,7 @@ def load_thumbnail(url, callback):
     def done(u, raw):
         _thumb_cache[u] = raw
         _thumb_jobs.discard(job)
-        pm = QPixmap()
-        pm.loadFromData(raw)
-        callback(pm)
+        _deliver(callback, raw)
 
     job.signals.done.connect(done)
     _pool.start(job)
@@ -170,27 +185,17 @@ class Tile(QFrame):
             self._load(image_url)
 
     def _load(self, url):
-        cached = _thumb_cache.get(url)
-        if cached is not None:
-            self._apply(url, cached)
-            return
-        job = _ThumbJob(url)
-        job.signals.done.connect(self._on_loaded)
-        _pool.start(job)
+        # Goes through load_thumbnail rather than starting a _ThumbJob here:
+        # the pool owns the C++ runnable but nothing owned the Python wrapper,
+        # so the wrapper — and the QObject carrying its signals — could be
+        # collected while the download thread was still running, and the emit
+        # then landed on freed memory. See ui/jobs.py for the same hazard.
+        load_thumbnail(url, self._apply)
 
-    def _on_loaded(self, url, data):
-        _thumb_cache[url] = data
-        self._apply(url, data)
-
-    def _apply(self, url, data):
-        pm = QPixmap()
-        if not pm.loadFromData(data):
-            return
-        try:
-            self.thumb.setPixmap(
-                rounded(pm, self._thumb_size, theme.RADIUS_SM))
-        except RuntimeError:
-            pass    # tile was destroyed while the download was in flight
+    def _apply(self, pixmap):
+        if pixmap.isNull() or not shiboken6.isValid(self):
+            return              # tile was destroyed while the fetch was in flight
+        self.thumb.setPixmap(rounded(pixmap, self._thumb_size, theme.RADIUS_SM))
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -208,6 +213,46 @@ class Avatar(QLabel):
         self.setAlignment(Qt.AlignCenter)
         initials = (text or "?").split("@")[0][:2].upper()
         self.setText(initials)
+
+
+class UserChip(QWidget):
+    """The signed-in artist in the header: avatar, name, and a details menu.
+
+    The chip answers "who am I signed in as, and how" without a preferences
+    window — which account launched the DCC is the first thing to check when a
+    task list comes back empty.
+    """
+
+    clicked = Signal()
+
+    def __init__(self, name, avatar_text=None, parent=None):
+        super().__init__(parent)
+        self.setObjectName("userChip")
+        self.setCursor(Qt.PointingHandCursor)
+
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(4, 0, 8, 0)
+        lay.setSpacing(8)
+
+        self.avatar = Avatar(avatar_text or name)
+        lay.addWidget(self.avatar)
+
+        self.name_lbl = QLabel(name)
+        lay.addWidget(self.name_lbl)
+
+        self.caret = QLabel("⌄")       # small chevron, "there is more here"
+        self.caret.setObjectName("tileSub")
+        lay.addWidget(self.caret)
+
+    def set_name(self, name, avatar_text=None):
+        self.name_lbl.setText(name)
+        if avatar_text is not None:
+            self.avatar.setText((avatar_text or "?").split("@")[0][:2].upper())
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit()
+        super().mouseReleaseEvent(event)
 
 
 class EmptyState(QWidget):

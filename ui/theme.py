@@ -85,6 +85,22 @@ QMainWindow, QWidget {{
     border-radius: 10px; font-weight: 700; font-size: 10px;
 }}
 
+#taskSearch {{
+    background: {SURFACE_SUNK}; border: 1px solid {BORDER};
+    border-radius: 13px; padding: 5px 12px; margin-right: 10px;
+    color: {TEXT}; font-size: 12px;
+}}
+#taskSearch:focus {{ border-color: {ACCENT_SUNK}; background: {SURFACE}; }}
+#searchResults {{
+    background: {SURFACE}; border: 1px solid {BORDER_HI};
+    border-radius: {RADIUS_SM}px; color: {TEXT}; padding: 4px;
+    outline: none;
+}}
+#searchResults::item {{ padding: 5px 8px; border-radius: {RADIUS_SM}px; }}
+#searchResults::item:selected {{
+    background: {ACCENT_SUNK}; color: {TEXT};
+}}
+
 #termBtn {{
     background: transparent; border: 1px solid {BORDER}; border-radius: {RADIUS_SM}px;
     color: {TEXT_DIM}; padding: 5px 12px; margin-right: 10px; font-size: 12px;

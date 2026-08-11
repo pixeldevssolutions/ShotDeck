@@ -52,12 +52,13 @@ class AuthResult:
     """
 
     def __init__(self, login="", display_name="", authorized=False,
-                 method=DENIED, reason=""):
+                 method=DENIED, reason="", domain=""):
         self.login = login
         self.display_name = display_name or login
         self.authorized = bool(authorized)
         self.method = method
         self.reason = reason
+        self.domain = domain      # shown in the header's profile menu
 
     def __repr__(self):
         return (f"AuthResult(login={self.login!r}, authorized={self.authorized}, "
@@ -181,7 +182,7 @@ def authenticate_password(username, password, cfg=None, connect=bind):
     if member is True:
         log.info("authenticated %s by bind", cfg.down_level(username))
         return AuthResult(login=username, display_name=display,
-                          authorized=True, method=BIND)
+                          authorized=True, method=BIND, domain=cfg.domain)
     if member is False:
         return AuthResult(login=username, display_name=display, method=DENIED,
                           reason=f"{username} is not a member of "
@@ -211,7 +212,7 @@ def authenticate_system_login(cfg=None, username=None):
     if member is True:
         log.info("authenticated %s by system login", cfg.down_level(username))
         return AuthResult(login=username, display_name=username,
-                          authorized=True, method=SSO)
+                          authorized=True, method=SSO, domain=cfg.domain)
     if member is False:
         return AuthResult(login=username, method=DENIED,
                           reason=f"{username} is not a member of "
