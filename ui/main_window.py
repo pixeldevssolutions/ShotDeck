@@ -22,10 +22,12 @@ log = applog.get()
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, sg):
+    def __init__(self, sg, login=None):
         super().__init__()
         self.sg = sg
-        self.login = getpass.getuser()
+        # login comes from auth.authenticate() in main(); the getpass fallback
+        # keeps the window constructible in tests and from a shell.
+        self.login = login or getpass.getuser()
         self.email = config.current_user_email(self.login)
         self.project = None
         self.task = None          # Task an app will be launched against

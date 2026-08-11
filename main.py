@@ -4,6 +4,8 @@ import sys
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 import applog
+import auth
+from auth import login_dialog
 from sg_client import SGClient
 from ui.main_window import MainWindow
 
@@ -20,6 +22,18 @@ def main():
     log.info("ShotDeck starting")
 
     app = QApplication(sys.argv)
+
+    # Authenticate before anything talks to ShotGrid or launches a DCC. On a
+    # domain-joined box this is silent; otherwise it prompts. Fail closed.
+    result = auth.authenticate(prompt=login_dialog.prompt)
+    if not result.authorized:
+        log.error("authentication failed: %s", result.reason)
+        QMessageBox.critical(None, "ShotDeck",
+                             result.reason or "You are not authorized to use "
+                                              "ShotDeck.")
+        return 1
+    log.info("signed in as %s (%s)", result.login, result.method)
+
     try:
         sg = SGClient()
     except Exception as e:
@@ -29,7 +43,7 @@ def main():
         QMessageBox.critical(None, "ShotDeck", str(e))
         return 1
 
-    win = MainWindow(sg)
+    win = MainWindow(sg, login=result.login)
     if args.console:
         win.show_console()
     win.show()

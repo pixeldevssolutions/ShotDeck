@@ -1,0 +1,55 @@
+# Active Directory auth config for PixelDesk / 5and8.
+# NEVER put passwords here. User credentials are bound at runtime and discarded.
+# Deploy path: /software/pipeline/sgdesk/sgdesk/auth/auth_config.yml
+# Override with env SGDESK_AUTH_CONFIG=/path/to/auth_config.yml
+
+enabled: true
+
+# --- domain ---------------------------------------------------------------
+domain: "5and8.net"
+netbios: "5AND8"                         # down-level: 5AND8\username
+host: "dc01.5and8.net"
+server_ip: "172.16.80.10"
+port: 636                                # 636 = LDAPS (preferred). 389 = plain/StartTLS.
+use_ssl: true                            # true -> LDAPS on 636. false -> StartTLS on 389.
+
+# Base DN derived from domain. CONFIRM against the real directory tree:
+# `CN=Users` is AD's default container; a custom OU would be `OU=Users`.
+base_dn: "DC=5and8,DC=net"
+
+# UPN template used to bind the user (username@5and8.net).
+upn_template: "{username}@5and8.net"
+
+# --- authorization --------------------------------------------------------
+# Only members of this group may launch. Path given by IT: 5and8.net/Users/ai-users
+required_group: "ai-users"
+# Full group DN. CONFIRM the container (CN=Users vs OU=Users):
+required_group_dn: "CN=ai-users,CN=Users,DC=5and8,DC=net"
+
+# --- system-login trust (SSO, preferred) ----------------------------------
+# If the machine is domain-joined (SSSD/winbind) and the OS user is a valid
+# domain user in required_group, launch WITHOUT an in-app password prompt.
+trust_system_login: true
+# How to verify the OS user's group membership without binding:
+#   "local"  -> `id -nG <user>` / getent (SSSD already resolves AD groups)
+#   "ldap"   -> anonymous/whoami LDAP lookup (needs directory read access)
+system_login_check: "local"
+
+# --- transport hardening --------------------------------------------------
+# Certificate validation for LDAPS / StartTLS. Set ca_certs_file when the DC
+# presents a certificate issued by the studio's internal CA.
+validate_certificate: true
+ca_certs_file: ""
+
+# Seconds to wait for the domain controller before giving up.
+timeout: 10
+
+# --- behaviour ------------------------------------------------------------
+# When SSO trust fails, show the login dialog instead of blocking.
+fallback_to_prompt: true
+# Map AD sAMAccountName -> ShotGrid HumanUser login (sg_task_owner match field).
+# "same" = AD username is used verbatim as the SG login.
+sg_login_mapping: "same"
+
+# --- dev ------------------------------------------------------------------
+# SGDESK_DEV_USER still overrides everything for local testing (no AD needed).
