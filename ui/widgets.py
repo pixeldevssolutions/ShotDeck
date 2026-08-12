@@ -15,6 +15,8 @@ from PySide6.QtWidgets import (
     QGraphicsDropShadowEffect, QStyledItemDelegate, QStyle,
 )
 
+import config
+
 from . import theme
 
 _pool = QThreadPool.globalInstance()
@@ -68,7 +70,7 @@ def load_thumbnail(url, callback):
     Shared by the tiles and the Version browser so a thumbnail already seen in
     one is never fetched again for the other.
     """
-    if not url:
+    if not url or not config.THUMBNAILS_ENABLED:
         return
     data = _thumb_cache.get(url)
     if data is not None:
@@ -175,11 +177,12 @@ class Tile(QFrame):
 
         lay.addStretch()
 
-        shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(16)
-        shadow.setOffset(0, 3)
-        shadow.setColor(QColor(0, 0, 0, 90))
-        self.setGraphicsEffect(shadow)
+        if config.TILE_SHADOWS_ENABLED:
+            shadow = QGraphicsDropShadowEffect(self)
+            shadow.setBlurRadius(16)
+            shadow.setOffset(0, 3)
+            shadow.setColor(QColor(0, 0, 0, 90))
+            self.setGraphicsEffect(shadow)
 
         if image_url:
             self._load(image_url)
