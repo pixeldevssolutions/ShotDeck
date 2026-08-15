@@ -213,6 +213,11 @@ class Splash(QWidget):
         self._fade.setDuration(self.GROUND_MS)
         self._fade.start()
 
+    def hideEvent(self, event):
+        # Hidden while the login dialog is up: no reason to keep repainting.
+        self._timer.stop()
+        super().hideEvent(event)
+
     def set_message(self, text):
         self._message = text
         self.update()

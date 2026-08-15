@@ -24,22 +24,34 @@ def main():
 
     app = QApplication(sys.argv)
 
+    # Up before anything else, so launching ShotDeck shows ShotDeck rather
+    # than a bare desktop while AD and ShotGrid are contacted.
+    splash = Splash("Loading Pipeline")
+    splash.show()
+    app.processEvents()
+
+    def prompt(*args, **kwargs):
+        """Get the splash out of the way of the login dialog, then bring it
+        back. On a domain-joined box this never runs and the splash is up for
+        the whole of startup."""
+        splash.hide()
+        try:
+            return login_dialog.prompt(*args, **kwargs)
+        finally:
+            splash.show()          # restarts the sequence from the top
+
     # Authenticate before anything talks to ShotGrid or launches a DCC. On a
     # domain-joined box this is silent; otherwise it prompts. Fail closed.
-    result = auth.authenticate(prompt=login_dialog.prompt)
+    result = auth.authenticate(prompt=prompt)
     if not result.authorized:
         log.error("authentication failed: %s", result.reason)
+        splash.close()
         QMessageBox.critical(None, "ShotDeck",
                              result.reason or "You are not authorized to use "
                                               "ShotDeck.")
         return 1
     log.info("signed in as %s (%s)", result.login, result.method)
-
-    # Up from here until the window is ready: connecting to ShotGrid and the
-    # first project query together are seconds of nothing on a cold cache.
-    splash = Splash("Loading Pipeline")
-    splash.show()
-    app.processEvents()
+    splash.set_message("Connecting to ShotGrid")
 
     try:
         sg = SGClient()
