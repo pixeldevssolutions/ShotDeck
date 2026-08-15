@@ -16,6 +16,7 @@ must never look like a failed publish, because the scene is already written.
 """
 
 import os
+import sys
 
 from . import context
 
@@ -44,11 +45,40 @@ class NotConfigured(RuntimeError):
     """No usable ShotGrid connection. The publish itself still succeeded."""
 
 
+API_PATH_VAR = "SHOTDECK_SG_API_PATH"
+
+
+def api():
+    """The shotgun_api3 module, or None.
+
+    A DCC ships its own Python and cannot see ShotDeck's venv, so the API is
+    normally missing here. ShotDeck exports SHOTDECK_SG_API_PATH pointing at
+    the directory it imports shotgun_api3 from; that is *appended* to sys.path
+    -- never prepended -- so a venv full of PySide and other libraries can
+    never shadow the DCC's own modules, which is how Qt collisions and hard
+    crashes start.
+    """
+    try:
+        import shotgun_api3
+        return shotgun_api3
+    except ImportError:
+        pass
+
+    path = os.environ.get(API_PATH_VAR)
+    if not path or not os.path.isdir(path):
+        return None
+    if path not in sys.path:
+        sys.path.append(path)
+    try:
+        import shotgun_api3
+        return shotgun_api3
+    except ImportError:
+        return None
+
+
 def available():
     """True when a registration attempt is worth making."""
-    try:
-        import shotgun_api3           # noqa: F401
-    except ImportError:
+    if api() is None:
         return False
     ctx = context.get()
     return bool(os.environ.get(KEY_VAR) and ctx.site and ctx.task_id)
@@ -56,12 +86,16 @@ def available():
 
 def connect():
     """A ShotGrid connection for this DCC session."""
-    try:
-        import shotgun_api3
-    except ImportError:
+    shotgun_api3 = api()
+    if shotgun_api3 is None:
         raise NotConfigured(
             "shotgun_api3 is not importable inside this DCC, so the publish "
-            "was not registered in ShotGrid.")
+            "was not registered in ShotGrid. {0} is {1} -- it is exported by "
+            "ShotDeck at launch, so this session was either started outside "
+            "ShotDeck or predates that export.".format(
+                API_PATH_VAR,
+                "unset" if not os.environ.get(API_PATH_VAR)
+                else "set to " + os.environ[API_PATH_VAR]))
 
     ctx = context.get()
     key = os.environ.get(KEY_VAR)

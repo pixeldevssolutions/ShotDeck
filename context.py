@@ -106,8 +106,29 @@ def env(ctx, path):
         # this rather than re-deriving the templates on the DCC side.
         "SHOTDECK_ENTITY_ROOT": ctx.get("entity_root") or "",
         "SHOTDECK_SEQUENCE": ctx.get("sequence") or "",
+        # Where shotgun_api3 lives, so a DCC can import it for publish
+        # registration. A DCC ships its own Python with its own site-packages
+        # and cannot see ShotDeck's venv otherwise.
+        "SHOTDECK_SG_API_PATH": _sg_api_path(),
     }
     return out
+
+
+def _sg_api_path():
+    """The directory containing the shotgun_api3 package, or "".
+
+    Read off the imported module rather than configured, so it follows the
+    venv ShotDeck is actually running from. In-DCC code appends this to
+    sys.path -- never prepends -- so it cannot shadow a DCC's own modules.
+    """
+    try:
+        import shotgun_api3
+    except ImportError:
+        return ""
+    location = getattr(shotgun_api3, "__file__", "")
+    if not location:
+        return ""
+    return os.path.dirname(os.path.dirname(os.path.abspath(location)))
 
 
 def _prune():
