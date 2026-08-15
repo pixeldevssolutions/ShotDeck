@@ -3,12 +3,14 @@
 
 Paste into Maya's Script Editor (Python tab) and run:
 
-    exec(open("/software/packages/tools/shotdeck_dcc/1.0.0/verify_maya.py").read())
-
-or, when the package is resolved, without knowing the version:
-
     import os
-    exec(open(os.environ["SHOTDECK_DCC_ROOT"] + "/verify_maya.py").read())
+    root = os.environ.get("SHOTDECK_DCC_ROOT",
+                          "/software/pipeline/ShotDeck/rez/shotdeck_dcc")
+    exec(open(root + "/verify_maya.py").read())
+
+SHOTDECK_DCC_ROOT is set by the rez package, so it is unset exactly when the
+package is not in the resolve -- which is itself the answer. The fallback above
+reads the checker straight out of the source tree so it still runs and says so.
 
 Every check prints PASS or FAIL with what to do about it. A FAIL on the first
 check makes the rest meaningless, so it stops there. Reads nothing and writes
@@ -41,11 +43,19 @@ def _importable():
     try:
         import shotdeck_dcc
     except ImportError as e:
+        if not os.environ.get("SHOTDECK_DCC_ROOT"):
+            return _fail(
+                "{0}\n     SHOTDECK_DCC_ROOT is unset too, so shotdeck_dcc was "
+                "not in this rez resolve at all. Usually that means it has "
+                "never been built: cd /software/pipeline/ShotDeck/rez/"
+                "shotdeck_dcc && rez build -ic, then relaunch. ShotDeck skips "
+                "injecting a package that is not released and logs a warning "
+                "in the session log.".format(e))
         return _fail(
-            "{0}\n     PYTHONPATH is not reaching Maya. Was Maya launched "
-            "from ShotDeck, or with `rez env maya-<ver> shotdeck_dcc -- maya`? "
-            "Check that shotdeck_dcc is built: cd rez/shotdeck_dcc && "
-            "rez build -ic".format(e))
+            "{0}\n     SHOTDECK_DCC_ROOT is set ({1}), so the package resolved "
+            "but its python/ folder is not on Maya's PYTHONPATH. Check the "
+            "PYTHONPATH.prepend in package.py against what the install "
+            "actually contains.".format(e, os.environ["SHOTDECK_DCC_ROOT"]))
     return _pass("{0} ({1})".format(shotdeck_dcc.__version__,
                                     shotdeck_dcc.__file__))
 
