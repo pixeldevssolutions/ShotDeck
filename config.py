@@ -83,6 +83,12 @@ FILE_MANAGER = os.environ.get("SHOTDECK_FILE_MANAGER", "xdg-open")
 THUMBNAILS_ENABLED = os.environ.get("SHOTDECK_THUMBNAILS", "1") != "0"
 TILE_SHADOWS_ENABLED = os.environ.get("SHOTDECK_TILE_SHADOWS", "1") != "0"
 
+# How long the opening sequence runs before it will hand over, even when the
+# window was ready sooner. The stages inside it are fractions of this, so one
+# number retimes the whole thing. SHOTDECK_SPLASH_MS=0 skips it entirely, which
+# is what you want when relaunching the app twenty times in a row.
+SPLASH_MS = max(0, int(os.environ.get("SHOTDECK_SPLASH_MS", "6000")))
+
 SOFTWARE_FIELDS = [
     "code", "sg_status_list", "image",
     "linux_path", "linux_args", "version",

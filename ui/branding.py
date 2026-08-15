@@ -128,6 +128,8 @@ def _ease_out(t):
 
 def _fade_in(elapsed, start, length):
     """0..1 over [start, start+length] ms, clamped either side."""
+    if length <= 0:                   # a stage with no duration is instant
+        return 1.0 if elapsed >= start else 0.0
     return _ease_out((elapsed - start) / length) if elapsed > start else 0.0
 
 
@@ -151,13 +153,15 @@ class Splash(QWidget):
     is later, then shows the window.
     """
 
-    MIN_MS = 3500                    # floor of the 3-5s the sequence is cut to
+    MIN_MS = config.SPLASH_MS        # the whole sequence; stages divide it up
     FADE_MS = 450
     INTERVAL_MS = 33                 # ~30fps
 
-    GROUND_MS = 800
-    MARK_MS = 2500
-    STATUS_MS = 2500
+    # Stages as fractions of MIN_MS, so retiming is one number in config.py and
+    # the beats keep their proportions instead of drifting apart.
+    GROUND_AT = 0.20                 # ground fade done, mark starts easing up
+    MARK_AT = 0.63                   # mark at full size
+    STATUS_AT = 0.63                 # status line starts fading in
 
     GRID = 46                        # px between grid lines
     PARTICLES = 34
@@ -169,6 +173,12 @@ class Splash(QWidget):
         self._message = message
         self._ready = False
         self._closing = False
+
+        # Instance copies: the tests and SHOTDECK_SPLASH_MS both retime a
+        # single splash without touching the class.
+        self.GROUND_MS = int(self.MIN_MS * self.GROUND_AT)
+        self.MARK_MS = int(self.MIN_MS * self.MARK_AT)
+        self.STATUS_MS = int(self.MIN_MS * self.STATUS_AT)
 
         # Roughly the main window's footprint (MainWindow opens 1080x720), so
         # the UI appears where the splash was rather than somewhere else.
@@ -204,13 +214,15 @@ class Splash(QWidget):
     # -- lifecycle ---------------------------------------------------------
 
     def show(self):
+        if self.MIN_MS <= 0:
+            return                   # SHOTDECK_SPLASH_MS=0: never appears
         self.setWindowOpacity(0.0)
         super().show()
         self._clock.start()
         self._timer.start()
         self._fade.setStartValue(0.0)
         self._fade.setEndValue(1.0)
-        self._fade.setDuration(self.GROUND_MS)
+        self._fade.setDuration(max(120, self.GROUND_MS))
         self._fade.start()
 
     def hideEvent(self, event):
@@ -234,7 +246,11 @@ class Splash(QWidget):
             self._maybe_close()
 
     def _maybe_close(self):
-        if self._closing or self._clock.elapsed() < self.MIN_MS:
+        if self._closing:
+            return
+        # An invalid clock means the splash was never shown (disabled), so
+        # there is nothing to wait for.
+        if self._clock.isValid() and self._clock.elapsed() < self.MIN_MS:
             return
         self._closing = True
         self._timer.stop()
@@ -242,6 +258,8 @@ class Splash(QWidget):
             self._window.show()
             self._window.raise_()
             self._window.activateWindow()
+        if not self.isVisible():
+            return                   # disabled: no fade to run
         self._fade.setDuration(self.FADE_MS)
         self._fade.setStartValue(self.windowOpacity())
         self._fade.setEndValue(0.0)
