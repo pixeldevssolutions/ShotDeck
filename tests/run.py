@@ -42,6 +42,7 @@ MODULES = [
     "test_latest_version",
     "test_review_service",
     "test_sg_client",
+    "test_auth",
     "test_ui",
 ]
 

@@ -68,6 +68,11 @@ QMainWindow, QWidget {{
 
 /* ---- header ---- */
 #header {{ background: {SURFACE}; border-bottom: 1px solid {BORDER}; }}
+/* The QWidget rule above paints every label {BG}, which on the {SURFACE}
+   header shows as a dark block whose edge reads as a divider. Labels here are
+   transparent; the avatar needs two ids to out-rank that and keep its fill. */
+#header QLabel {{ background: transparent; }}
+#header #avatar {{ background: {ACCENT_SUNK}; }}
 #headerTitle {{ font-size: 16px; font-weight: 600; color: {TEXT}; }}
 #crumb {{ color: {TEXT_FAINT}; font-size: 16px; padding: 0 2px; }}
 #backBtn {{
@@ -83,6 +88,22 @@ QMainWindow, QWidget {{
 #avatar {{
     background: {ACCENT_SUNK}; color: {TEXT};
     border-radius: 10px; font-weight: 700; font-size: 10px;
+}}
+
+#taskSearch {{
+    background: {SURFACE_SUNK}; border: 1px solid {BORDER};
+    border-radius: 13px; padding: 5px 12px; margin-right: 10px;
+    color: {TEXT}; font-size: 12px;
+}}
+#taskSearch:focus {{ border-color: {ACCENT_SUNK}; background: {SURFACE}; }}
+#searchResults {{
+    background: {SURFACE}; border: 1px solid {BORDER_HI};
+    border-radius: {RADIUS_SM}px; color: {TEXT}; padding: 4px;
+    outline: none;
+}}
+#searchResults::item {{ padding: 5px 8px; border-radius: {RADIUS_SM}px; }}
+#searchResults::item:selected {{
+    background: {ACCENT_SUNK}; color: {TEXT};
 }}
 
 #termBtn {{

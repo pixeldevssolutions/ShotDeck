@@ -13,6 +13,7 @@ ShotDeck code is run headless (probes, cron jobs, tests).
 """
 
 import datetime
+import faulthandler
 import logging
 import os
 import re
@@ -27,6 +28,7 @@ LOG_MAX_AGE_SECONDS = 14 * 24 * 3600
 _log = logging.getLogger("shotdeck")
 _subscribers = []
 _configured = False
+_crash_file = None      # kept open for faulthandler, see _enable_crash_dump()
 
 
 class _FanoutHandler(logging.Handler):
@@ -73,9 +75,27 @@ def setup(verbose=False):
     fanout.setFormatter(fmt)
     _log.addHandler(fanout)
 
+    _enable_crash_dump()
+
     _configured = True
     _log.info("session log: %s", session_path)
     return _log
+
+
+def _enable_crash_dump():
+    """Write a Python traceback to crash-<pid>.log on a hard crash.
+
+    A segfault inside Qt gives the artist "exit code 139" and nothing else.
+    faulthandler turns that into the Python stack of every thread at the
+    moment of the fault, which is usually enough to name the widget.
+    """
+    global _crash_file
+    try:
+        _crash_file = open(os.path.join(LOG_DIR, f"crash-{os.getpid()}.log"),
+                           "w")
+        faulthandler.enable(file=_crash_file, all_threads=True)
+    except Exception:
+        faulthandler.enable(all_threads=True)
 
 
 def get():

@@ -10,6 +10,7 @@ import config
 import paths
 import rez_scan
 from . import theme
+from .branding import LoadingPage
 from .widgets import Tile, EmptyState, StatusPill, DueDate
 
 TILE_WIDTH = 208
@@ -110,6 +111,7 @@ class TasksTable(QWidget):
         self._project = None         # needed to build folder paths
         self._statuses = []          # [(code, label), ...] from the SG schema
         self._latest = {}            # task id -> newest Version, one query
+        self._loading = False        # waiting on the first set_tasks()
         self._attention = {}         # task id -> why it needs attention
 
         lay = QVBoxLayout(self)
@@ -174,9 +176,30 @@ class TasksTable(QWidget):
             "match is configured.")
         self.stack.addWidget(self.empty)
 
+        self.loading = LoadingPage("Loading your tasks...")
+        self.stack.addWidget(self.loading)
+
+    def set_loading(self):
+        """Show the pulsing logo until set_tasks() says what actually arrived.
+
+        Without this the table shows the "no tasks assigned" empty state for as
+        long as the ShotGrid query takes, which reads as an answer rather than
+        a wait.
+        """
+        self._loading = True
+        self.stack.setCurrentWidget(self.loading)
+
     def set_tasks(self, tasks):
         self._tasks = tasks
+        self._loading = False
         self._rebuild()
+
+    def _selected_task_id(self):
+        rows = self.table.selectionModel().selectedRows()
+        if not rows:
+            return None
+        r = rows[0].row()
+        return self._rows[r]["id"] if r < len(self._rows) else None
 
     def _on_selection(self):
         rows = self.table.selectionModel().selectedRows()
@@ -188,6 +211,24 @@ class TasksTable(QWidget):
 
     def set_project(self, project):
         self._project = project
+
+    def select_task(self, task_id):
+        """Select and scroll to a task by id. False when it is not on the page.
+
+        The filter box is cleared first: arriving from the header search only
+        to land on an empty table because a stale filter hides the task is a
+        worse answer than losing the filter.
+        """
+        if not any(t["id"] == task_id for t in self._tasks):
+            return False
+        if self.search.text():
+            self.search.clear()          # clearing rebuilds the table
+        for row, task in enumerate(self._rows):
+            if task["id"] == task_id:
+                self.table.selectRow(row)
+                self.table.scrollToItem(self.table.item(row, 0))
+                return True
+        return False
 
     def _on_context_menu(self, pos):
         """Right-click a task: open its folder, or launch a DCC on it."""
@@ -371,6 +412,10 @@ class TasksTable(QWidget):
 
     def _rebuild(self):
         text = self.search.text().lower()
+        # Latest versions and review dots arrive after the rows do and rebuild
+        # the table under the artist. Without this, the task they had selected
+        # — and so the context an app would launch against — quietly clears.
+        selected = self._selected_task_id()
         self.table.setUpdatesEnabled(False)
         self.table.setRowCount(0)
         self._rows = []
@@ -413,6 +458,11 @@ class TasksTable(QWidget):
                 self.table.setItem(r, c, item)
 
         self.table.setUpdatesEnabled(True)
+        if selected is not None:
+            for row, task in enumerate(self._rows):
+                if task["id"] == selected:
+                    self.table.selectRow(row)
+                    break
 
         total = len(self._tasks)
         shown = len(self._rows)
@@ -420,7 +470,8 @@ class TasksTable(QWidget):
             f"{shown} of {total}" if text and total else
             (f"{total} task{'s' if total != 1 else ''}" if total else ""))
         self.hint.setVisible(bool(shown))
-        self.stack.setCurrentWidget(self.table if shown else self.empty)
+        if not self._loading:
+            self.stack.setCurrentWidget(self.table if shown else self.empty)
 
 
 class SoftwarePage(QWidget):
@@ -484,6 +535,16 @@ class SoftwarePage(QWidget):
 
     def set_tasks(self, tasks):
         self.tasks.set_tasks(tasks)
+
+    def set_loading(self):
+        self.tasks.set_loading()
+
+    def select_task(self, task_id):
+        """Show the My Tasks tab with this task selected. False if unknown."""
+        if not self.tasks.select_task(task_id):
+            return False
+        self.tabs.setCurrentWidget(self.tasks)
+        return True
 
     def set_task(self, task):
         if not task:

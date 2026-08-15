@@ -48,6 +48,8 @@ class FakeShotgun:
         self.notes = []
         self.replies = []
         self.users = [ARTIST, PRODUCER, CLIENT]
+        self.projects = [PROJECT]
+        self.tasks = []
         self.published_files = []
         self.uploads = []
         self.deleted = []
@@ -137,6 +139,12 @@ class FakeShotgun:
             # answer that too or every integration path runs without an owner.
             return [u for u in self.users
                     if all(u.get(f[0]) == f[2] for f in simple)]
+        if entity_type == "Project":
+            # The status/template filters are the site's business; the fake
+            # only ever holds projects a test put there.
+            return list(self.projects)
+        if entity_type == "Task":
+            return [t for t in self.tasks if _matches(t, filters)]
         if entity_type == "Step":
             return [{"type": "Step", "id": 9, "code": "Comp",
                      "entity_type": "Shot"},
@@ -273,6 +281,25 @@ def _deep_get(version, field):
     if isinstance(value, dict) and len(parts) == 3:
         return value.get(parts[2])
     return None
+
+
+def add_task(sg, content, project=None, entity_name=None, task_id=None,
+             owner=None, step=None):
+    """Seed a task assigned to the artist. Returns the task dict."""
+    project = project or PROJECT
+    task = dict(
+        TASK,
+        id=task_id if task_id is not None else 7700 + len(sg.tasks),
+        content=content,
+        project=project,
+        entity=dict(SHOT, name=entity_name or SHOT["name"]),
+        step=dict(TASK["step"], name=step or content),
+        sg_assigned_to=owner or ARTIST["email"],
+    )
+    sg.tasks.append(task)
+    if not any(p["id"] == project["id"] for p in sg.projects):
+        sg.projects.append(project)
+    return task
 
 
 def client(sg=None):

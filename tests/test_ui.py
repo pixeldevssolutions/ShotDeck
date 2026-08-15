@@ -819,6 +819,244 @@ def test_a_version_with_no_thumbnail_still_lists():
     assert browser.table.item(0, 0).icon().isNull()
 
 
+# -- searching every project's tasks ---------------------------------------
+
+OTHER_PROJECT = {"id": 1400, "name": "SHOW002", "tank_name": "SHOW002"}
+
+
+def _searchable():
+    """A client whose artist has tasks on two different shows."""
+    sg = fakes.FakeShotgun()
+    fakes.add_task(sg, "Compositing", entity_name="AD1030")
+    fakes.add_task(sg, "Lighting", entity_name="AD1030")
+    fakes.add_task(sg, "Compositing", project=OTHER_PROJECT,
+                   entity_name="XY0100")
+    return sg
+
+
+def test_search_matches_words_in_any_order():
+    from ui.task_search import matches
+
+    sg = _searchable()
+    found = matches(sg.tasks, "ad1030 comp")
+    assert len(found) == 1
+    assert found[0]["content"] == "Compositing"
+    assert found[0]["entity"]["name"] == "AD1030"
+
+
+def test_search_reaches_tasks_on_other_projects():
+    from ui.task_search import matches
+
+    sg = _searchable()
+    found = matches(sg.tasks, "xy0100")
+    assert len(found) == 1
+    assert found[0]["project"]["name"] == "SHOW002"
+
+
+def test_search_matches_the_project_name_too():
+    from ui.task_search import matches
+
+    assert len(matches(_searchable().tasks, "show002")) == 1
+
+
+def test_the_task_list_is_fetched_once_not_per_keystroke():
+    from ui.task_search import TaskSearch
+
+    search = TaskSearch()
+    asked = []
+    search.tasks_needed.connect(lambda: asked.append(1))
+    for text in ("a", "ad", "ad1"):
+        search.edit.setText(text)
+    assert len(asked) == 1
+
+
+def test_choosing_a_result_opens_its_project_and_selects_the_task():
+    sg = _searchable()
+    win = MainWindowFor(sg)
+    target = [t for t in sg.tasks if t["project"]["id"] == OTHER_PROJECT["id"]][0]
+
+    win.goto_task(target)
+    settle()
+
+    assert win.project["id"] == OTHER_PROJECT["id"], \
+        "the task's own project should be the one that opened"
+    assert win.task and win.task["id"] == target["id"], \
+        "the task should be selected, not just visible"
+    assert win.stack.currentWidget() is win.software_page
+
+
+def test_a_result_is_found_even_behind_a_stale_filter():
+    sg = _searchable()
+    win = MainWindowFor(sg)
+    win.open_project(fakes.PROJECT)
+    settle()
+    win.software_page.tasks.search.setText("lighting")
+    settle()
+
+    comp = [t for t in sg.tasks
+            if t["project"]["id"] == fakes.PROJECT["id"]
+            and t["content"] == "Compositing"][0]
+    win.goto_task(comp)
+    settle()
+    assert win.task["id"] == comp["id"]
+
+
+def test_a_selected_task_survives_the_late_arriving_columns():
+    """Latest versions and review dots rebuild the table after the rows load.
+
+    They used to clear the selection with it, which silently dropped the task
+    an app would have launched against.
+    """
+    from ui.software_page import TasksTable
+
+    sg = _searchable()
+    table = TasksTable()
+    table.set_tasks([t for t in sg.tasks
+                     if t["project"]["id"] == fakes.PROJECT["id"]])
+    table.table.selectRow(0)
+    chosen = table._rows[0]["id"]
+
+    table.set_latest_versions({chosen: {"id": 5, "code": "AD1030_comp_v003"}})
+    assert table._selected_task_id() == chosen
+
+
+def MainWindowFor(sg):
+    from ui.main_window import MainWindow
+
+    win = MainWindow(fakes.client(sg), login="jitesh")
+    settle()
+    return win
+
+
+# -- the signed-in user ----------------------------------------------------
+
+def test_a_tile_thumbnail_keeps_its_download_alive():
+    """The wrapper must outlive the download.
+
+    A _ThumbJob started without a Python reference is collected while its
+    thread still runs, and the emit then lands on a freed QObject — a segfault
+    minutes later, on whatever the artist clicked next.
+    """
+    from ui import widgets
+
+    url = "https://sg.example/tile-not-cached.png"
+    widgets._thumb_cache.pop(url, None)
+    started = []
+    original = widgets._pool.start
+    widgets._pool.start = lambda job: started.append(job)
+    try:
+        widgets.Tile("Some Project", image_url=url)
+        assert started, "the tile should have started a fetch"
+        assert started[0] in widgets._thumb_jobs, \
+            "the job wrapper must be held while the download runs"
+    finally:
+        widgets._pool.start = original
+        widgets._thumb_jobs.clear()
+
+
+def test_a_thumbnail_arriving_after_its_widget_died_is_dropped():
+    from ui import widgets
+
+    url = _seed_thumbnail("https://sg.example/late.png")
+
+    def dead(pixmap):
+        raise RuntimeError("Internal C++ object already deleted.")
+
+    widgets.load_thumbnail(url, dead)      # must not propagate
+
+
+def test_the_header_shows_the_signed_in_user():
+    from ui.widgets import UserChip
+
+    chip = UserChip("Jitesh Ghase", avatar_text="jitesh@5and8.ai")
+    assert chip.name_lbl.text() == "Jitesh Ghase"
+    assert chip.avatar.text() == "JI"
+
+    chip.set_name("Jitesh G", avatar_text="jghase@5and8.ai")
+    assert chip.name_lbl.text() == "Jitesh G"
+    assert chip.avatar.text() == "JG"
+
+
+def test_the_logo_drops_its_white_ground_and_takes_the_theme_colour():
+    """The asset is black on opaque white; untinted it is a white brick."""
+    from ui import branding, theme
+
+    img = branding.logo_pixmap(120).toImage()
+    alphas = [img.pixelColor(x, y).alpha()
+              for y in range(img.height()) for x in range(img.width())]
+    clear = sum(1 for a in alphas if a < 40)
+    assert clear > len(alphas) * 0.6         # the ground really is gone
+    assert max(alphas) > 200                 # the mark itself is still solid
+
+    ink = next(img.pixelColor(x, y)
+               for y in range(img.height()) for x in range(img.width())
+               if img.pixelColor(x, y).alpha() > 200)
+    want = QColor(theme.TEXT)
+    # Premultiplied storage rounds each channel, so this is near, not equal.
+    assert all(abs(a - b) <= 4 for a, b in
+               [(ink.red(), want.red()), (ink.green(), want.green()),
+                (ink.blue(), want.blue())])
+
+
+def test_the_splash_holds_its_minimum_even_when_startup_was_instant():
+    """A splash that flickers past on a warm cache is worse than none."""
+    from ui.branding import Splash, _fade_in
+
+    assert _fade_in(400, 800, 900) == 0.0        # before the stage starts
+    assert 0 < _fade_in(1200, 800, 900) < 1.0    # mid-stage
+    assert _fade_in(9000, 800, 900) == 1.0       # clamped after
+
+    splash = Splash("Loading Pipeline")
+    splash.MIN_MS = 10 ** 6                      # startup can never beat this
+    splash.show()
+    splash.finish(None)
+    assert splash._ready and not splash._closing
+
+    splash.MIN_MS = 0
+    splash._maybe_close()
+    assert splash._closing
+    splash.close()
+
+
+def test_tasks_show_the_pulsing_logo_until_the_query_answers():
+    """An empty table during the wait reads as "no tasks", which is a lie."""
+    from ui.software_page import TasksTable
+
+    table = TasksTable()
+    table.set_loading()
+    assert table.stack.currentWidget() is table.loading
+
+    # A filter keystroke mid-flight must not swap the wait for an empty state.
+    table.search.setText("comp")
+    assert table.stack.currentWidget() is table.loading
+
+    table.set_tasks([])
+    assert table.stack.currentWidget() is table.empty
+
+
+def test_the_profile_menu_says_who_and_how():
+    win = _window()
+    rows = dict(win._user_details())
+    assert rows["Login"] == "jitesh"
+    assert rows["Name"] == "Jitesh Ghase"
+    assert rows["Domain"] == "5and8.net"
+    assert "Workstation login" in rows["Signed in with"]
+
+
+def test_the_profile_menu_names_the_shotgrid_user():
+    win = _window()
+    assert dict(win._user_details())["ShotGrid"] == fakes.ARTIST["name"]
+
+    win.owner = None
+    assert "no" in dict(win._user_details())["ShotGrid"].lower(), \
+        "an unmatched HumanUser is the first thing to explain, not to hide"
+
+
+def test_the_window_falls_back_to_the_os_user_without_auth():
+    win = _window(auth=False)
+    assert win.login, "the window must still be constructible without auth"
+
+
 # -- integration -----------------------------------------------------------
 
 def test_browser_compare_menu_offers_previous_latest_and_pick():
@@ -891,6 +1129,21 @@ def _choose(dialog, path):
 def _same(a, b):
     return os.path.normcase(os.path.normpath(a)) == \
         os.path.normcase(os.path.normpath(b))
+
+
+def _window(auth=True):
+    """A MainWindow on the fake ShotGrid, signed in the way SSO signs one in."""
+    from auth import AuthResult, SSO
+    from ui.main_window import MainWindow
+
+    result = AuthResult(login="jitesh", display_name="Jitesh Ghase",
+                        authorized=True, method=SSO,
+                        domain="5and8.net") if auth else None
+    win = MainWindow(fakes.client(fakes.FakeShotgun()),
+                     login=result.login if result else None,
+                     auth_result=result)
+    settle()
+    return win
 
 
 def _labels(widget):

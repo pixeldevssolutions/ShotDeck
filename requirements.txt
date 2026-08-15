@@ -1,3 +1,4 @@
 PySide6>=6.5
 shotgun-api3
 PyYAML
+ldap3

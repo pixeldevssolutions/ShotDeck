@@ -3,18 +3,19 @@ import getpass
 from PySide6.QtCore import Qt, QThreadPool
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QStackedWidget, QMessageBox, QSplitter,
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
+    QMenu, QPushButton, QStackedWidget, QMessageBox, QSplitter,
 )
 
 import applog, config, launcher, paths
 from . import jobs
-from .widgets import STYLE, Avatar
+from .widgets import STYLE, UserChip
 from .console import ConsolePanel
 from .project_page import ProjectPage
 from .publish_dialog import PublishDialog
 from .review_page import ReviewPage
 from .software_page import SoftwarePage
+from .task_search import TaskSearch
 from .version_browser import VersionBrowser
 from .version_compare import VersionCompare
 
@@ -22,11 +23,20 @@ log = applog.get()
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, sg):
+    def __init__(self, sg, login=None, auth_result=None):
         super().__init__()
         self.sg = sg
-        self.login = getpass.getuser()
+        # login comes from auth.authenticate() in main(); the getpass fallback
+        # keeps the window constructible in tests and from a shell.
+        self.auth = auth_result
+        self.login = login or (auth_result.login if auth_result else None) \
+            or getpass.getuser()
         self.email = config.current_user_email(self.login)
+        self.display_name = (auth_result.display_name if auth_result
+                             else None) or self.login
+        self.owner = None         # ShotGrid HumanUser, filled by _bootstrap
+        self._projects = []       # full Project dicts, for the header search
+        self._pending_task_id = None    # task to select once its project loads
         self.project = None
         self.task = None          # Task an app will be launched against
         self.pool = QThreadPool.globalInstance()
@@ -75,6 +85,12 @@ class MainWindow(QMainWindow):
 
         h.addStretch()
 
+        # Find a task without remembering which show it is on.
+        self.task_search = TaskSearch()
+        self.task_search.tasks_needed.connect(self._load_all_tasks)
+        self.task_search.task_chosen.connect(self.goto_task)
+        h.addWidget(self.task_search)
+
         # Needs Attention sits in the header rather than in a tab: it is a
         # different question from "what are my tasks", and the artist has to
         # be able to see the count without going looking for it.
@@ -97,16 +113,7 @@ class MainWindow(QMainWindow):
         self.term_btn.toggled.connect(self.toggle_console)
         h.addWidget(self.term_btn)
 
-        chip = QWidget()
-        chip.setObjectName("userChip")
-        chip_lay = QHBoxLayout(chip)
-        chip_lay.setContentsMargins(4, 0, 10, 0)
-        chip_lay.setSpacing(8)
-        chip_lay.addWidget(Avatar(self.email))
-        self.user_lbl = QLabel(self.email.split("@")[0])
-        self.user_lbl.setToolTip(self.email)
-        chip_lay.addWidget(self.user_lbl)
-        h.addWidget(chip)
+        h.addWidget(self._build_user_chip())
         root.addWidget(header)
 
         # pages, with the terminal as a collapsible bottom pane
@@ -133,6 +140,8 @@ class MainWindow(QMainWindow):
 
         QShortcut(QKeySequence("Ctrl+`"), self,
                   activated=self.term_btn.toggle)
+        QShortcut(QKeySequence("Ctrl+K"), self,
+                  activated=self.task_search.focus)
 
         self.project_page.project_selected.connect(self.open_project)
         self.software_page.software_launched.connect(self.launch_software)
@@ -150,6 +159,55 @@ class MainWindow(QMainWindow):
 
         self.statusBar().showMessage("Connecting to ShotGrid...")
         self._run(self._bootstrap, self._on_bootstrap)
+
+    # -- signed-in user ----------------------------------------------------
+
+    AUTH_METHOD_LABELS = {
+        "sso": "Workstation login (Active Directory)",
+        "bind": "Password sign-in (Active Directory)",
+        "dev": "Developer override (SGDESK_DEV_USER)",
+        "disabled": "Authentication disabled in auth_config.yml",
+    }
+
+    def _build_user_chip(self):
+        self.user_chip = UserChip(self.display_name, avatar_text=self.email)
+        self.user_chip.setToolTip("Who ShotDeck is signed in as")
+        self.user_chip.clicked.connect(self._show_user_menu)
+        # Kept for the tests and for anything that reads the header text.
+        self.user_lbl = self.user_chip.name_lbl
+        return self.user_chip
+
+    def _user_details(self):
+        """(label, value) rows for the profile menu, in reading order."""
+        rows = [("Name", self.display_name),
+                ("Login", self.login),
+                ("Email", self.email)]
+        if self.auth is not None:
+            rows.append(("Signed in with",
+                         self.AUTH_METHOD_LABELS.get(self.auth.method,
+                                                     self.auth.method)))
+            if getattr(self.auth, "domain", ""):
+                rows.append(("Domain", self.auth.domain))
+        if self.owner:
+            rows.append(("ShotGrid",
+                         self.owner.get("name") or self.owner.get("login", "")))
+        else:
+            rows.append(("ShotGrid", f"no {config.TASK_OWNER_ENTITY} matched "
+                                     f"{self.email}"))
+        return rows
+
+    def _show_user_menu(self):
+        menu = QMenu(self)
+        for label, value in self._user_details():
+            action = menu.addAction(f"{label}:  {value}")
+            action.setEnabled(False)
+        menu.addSeparator()
+        menu.addAction("Copy email address",
+                       lambda: QApplication.clipboard().setText(self.email))
+        menu.addAction("Copy login", lambda: QApplication.clipboard()
+                       .setText(self.login))
+        menu.exec(self.user_chip.mapToGlobal(
+            self.user_chip.rect().bottomLeft()))
 
     # -- review inbox ------------------------------------------------------
 
@@ -262,7 +320,11 @@ class MainWindow(QMainWindow):
 
     def _on_bootstrap(self, result):
         owner, projects, statuses = result
+        self.owner = owner
+        self._projects = projects
         self.software_page.set_statuses(statuses)
+        if owner and owner.get("name"):
+            self.user_chip.set_name(owner["name"])
         if not owner and config.TASK_OWNER_IS_ENTITY:
             self.statusBar().showMessage(
                 f"No {config.TASK_OWNER_ENTITY} found with "
@@ -278,6 +340,43 @@ class MainWindow(QMainWindow):
         else:
             self.statusBar().showMessage(f"Connected — {len(projects)} projects")
         self.project_page.set_projects(projects)
+
+    # -- searching every project's tasks -------------------------------------
+
+    def _load_all_tasks(self):
+        """One query for the artist's whole workload, for the header search."""
+        self._run(self.sg.all_my_tasks, self.task_search.set_tasks,
+                  on_error=lambda m: log.warning(
+                      "could not load the task search list: %s", m))
+
+    def goto_task(self, task):
+        """Open the task's project and land on the task itself."""
+        project = self._project_for(task)
+        if not project:
+            QMessageBox.information(
+                self, "Search",
+                f"'{task.get('content', 'That task')}' is not on a project "
+                f"ShotDeck can open.")
+            return
+        if not self.project or self.project["id"] != project["id"]:
+            self._pending_task_id = task["id"]
+            self.open_project(project)
+            return
+        self._select_task(task["id"])
+
+    def _project_for(self, task):
+        """The full Project dict — the task's own carries only id and name."""
+        link = task.get("project") or {}
+        for project in self._projects:
+            if project["id"] == link.get("id"):
+                return project
+        return link if link.get("id") else None
+
+    def _select_task(self, task_id):
+        if self.software_page.select_task(task_id):
+            return True
+        log.info("task %s is not in this project's task list", task_id)
+        return False
 
     # -- navigation ---------------------------------------------------------
 
@@ -299,7 +398,7 @@ class MainWindow(QMainWindow):
         self.back_btn.show()
         self.stack.setCurrentWidget(self.software_page)
         self.software_page.set_software([])
-        self.software_page.set_tasks([])
+        self.software_page.set_loading()
         self.statusBar().showMessage("Loading apps and tasks...")
 
         self._run(self.sg.software_for_project, self._on_software, project)
@@ -311,6 +410,10 @@ class MainWindow(QMainWindow):
 
     def _on_tasks(self, tasks):
         self.software_page.set_tasks(tasks)
+        if self._pending_task_id is not None:
+            # Arrived here from the header search: the tasks only exist now.
+            self._select_task(self._pending_task_id)
+            self._pending_task_id = None
         if not tasks:
             return
         # One query for the whole page. A query per task is the N+1 that makes

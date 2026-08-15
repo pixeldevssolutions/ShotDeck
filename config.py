@@ -74,6 +74,15 @@ ENTITY_SUBFOLDERS = [
 # SHOTDECK_FILE_MANAGER=nautilus (or dolphin, thunar, nemo) if that misfires.
 FILE_MANAGER = os.environ.get("SHOTDECK_FILE_MANAGER", "xdg-open")
 
+# Two kill-switches for isolating a hard crash on a workstation. Both are on
+# by default; setting either to 0 removes a whole class of Qt work from the
+# grids without changing anything else, which is the fastest way to tell a
+# thumbnail/pixmap fault apart from a compositing one.
+#   SHOTDECK_THUMBNAILS=0    no downloads, no QPixmap decoding, initials only
+#   SHOTDECK_TILE_SHADOWS=0  no QGraphicsDropShadowEffect on the tiles
+THUMBNAILS_ENABLED = os.environ.get("SHOTDECK_THUMBNAILS", "1") != "0"
+TILE_SHADOWS_ENABLED = os.environ.get("SHOTDECK_TILE_SHADOWS", "1") != "0"
+
 SOFTWARE_FIELDS = [
     "code", "sg_status_list", "image",
     "linux_path", "linux_args", "version",
