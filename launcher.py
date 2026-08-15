@@ -120,29 +120,35 @@ def _build_command(software):
     return [exe] + args
 
 
-def _rez_packages(software):
-    """Requested packages, plus the context package when it is released.
+# (package, what is lost when it has not been released yet)
+_INJECTED_PACKAGES = [
+    (config.REZ_CONTEXT_PACKAGE,
+     "In-DCC tools must fall back to the SHOTDECK_* variables"),
+    (config.REZ_DCC_PACKAGE,
+     "The ShotDeck menu will not appear inside the DCC"),
+]
 
-    Asking for a package that doesn't exist makes rez reject the whole
-    resolve, so an unbuilt shotdeck_context would block every launch. The
-    SHOTDECK_* variables carry the context regardless, so skipping it costs
-    only the convenience of `import shotdeck_context`.
+
+def _rez_packages(software):
+    """Requested packages, plus ShotDeck's own when they are released.
+
+    Asking for a package that doesn't exist makes rez reject the whole resolve,
+    so an unbuilt shotdeck_dcc would block every launch. Both are therefore
+    optional: the launch still works, it just arrives with less.
     """
     pkgs = (software.get(config.SOFTWARE_REZ_FIELD) or "").split()
     if not pkgs:
         return []
 
-    ctx_pkg = config.REZ_CONTEXT_PACKAGE
-    if not ctx_pkg or any(p.split("-")[0] == ctx_pkg for p in pkgs):
-        return pkgs
-
-    if rez_scan.is_available(ctx_pkg):
-        pkgs.append(ctx_pkg)
-    else:
-        log.warning(
-            "%s is not released yet — launching without it. In-DCC tools must "
-            "fall back to the SHOTDECK_* variables. Build it with: "
-            "cd rez/%s && rez build -ic", ctx_pkg, ctx_pkg)
+    for name, cost in _INJECTED_PACKAGES:
+        if not name or any(p.split("-")[0] == name for p in pkgs):
+            continue
+        if rez_scan.is_available(name):
+            pkgs.append(name)
+        else:
+            log.warning(
+                "%s is not released yet — launching without it. %s. Build it "
+                "with: cd rez/%s && rez build -ic", name, cost, name)
     return pkgs
 
 

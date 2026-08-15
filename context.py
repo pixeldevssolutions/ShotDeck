@@ -17,6 +17,7 @@ import time
 import uuid
 
 import config
+import paths
 
 CONTEXT_DIR = os.environ.get(
     "SHOTDECK_CONTEXT_DIR", os.path.expanduser("~/.shotdeck/context"))
@@ -34,6 +35,9 @@ def build(project, software, task=None, login=None, email=None):
         "created": time.time(),
         "site": config.SG_SITE,
         "host": socket.gethostname(),
+        # Resolved here, where the templates live, so in-DCC tools never have
+        # to carry a second copy of ENTITY_PATH_TEMPLATES.
+        "entity_root": paths.entity_root(project, task) if task else "",
         "user": {
             "login": login or getpass.getuser(),
             "email": email or "",
@@ -95,6 +99,9 @@ def env(ctx, path):
         "SHOTDECK_ENTITY_TYPE": task.get("entity_type") or "",
         "SHOTDECK_ENTITY_ID": str(task.get("entity_id") or ""),
         "SHOTDECK_ENTITY_NAME": task.get("entity_name") or "",
+        # Where this task's scenes live. shotdeck_dcc builds work paths from
+        # this rather than re-deriving the templates on the DCC side.
+        "SHOTDECK_ENTITY_ROOT": ctx.get("entity_root") or "",
     }
     return out
 

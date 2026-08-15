@@ -103,6 +103,11 @@ SOFTWARE_REZ_FIELD = "sg_rez_packages"
 # Package appended to every rez request so in-DCC tools can `import
 # shotdeck_context`. Set to "" to stop injecting it.
 REZ_CONTEXT_PACKAGE = "shotdeck_context"
+# Package that carries the in-DCC tools and their startup hooks. Appended the
+# same way, so launching a DCC is the whole install -- no artist ever copies a
+# userSetup.py. It requires shotdeck_context, so injecting it pulls in both.
+# Set to "" to launch DCCs without the ShotDeck menu.
+REZ_DCC_PACKAGE = "shotdeck_dcc"
 
 # -- standalone publish ----------------------------------------------------
 
