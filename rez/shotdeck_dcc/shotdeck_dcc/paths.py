@@ -40,6 +40,9 @@ DEFAULT_PUBLISH_LAYOUT = "{software}/{step}/publish"
 
 VERSION_RE = re.compile(r"_v(\d+)", re.IGNORECASE)
 
+# uat6_SEQ001_AD1030_lighting_jitesh_v0001.ma
+VERSION_PADDING = 4
+
 
 def _layout(software):
     return LAYOUT.get((software or "").lower(), DEFAULT_LAYOUT)
@@ -81,16 +84,28 @@ def publish_dir(ctx=None):
 
 
 def publish_path(version, ctx=None, ext=None):
-    """Absolute path a published version lands at, or None without a task.
+    """Where a version would publish to. Preview only -- see publish_for().
 
-    Same file name as the work file it came from: the version number is the
-    link between the two, and renaming on publish only makes them hard to
-    match up later.
+    The real publish takes its name from the scene the DCC actually saved, so
+    this is what the menu shows before the artist agrees, not what gets used.
     """
     folder = publish_dir(ctx)
     if not folder:
         return None
     return folder + "/" + scene_name(version, ctx, ext)
+
+
+def publish_for(work_path, ctx=None):
+    """The publish path for a work file that exists, keeping its exact name.
+
+    Publishing must never invent a second file name: the work file and its
+    publish are the same bytes under the same name in a different folder, so
+    they can be matched up by eye a year later.
+    """
+    folder = publish_dir(ctx)
+    if not folder:
+        return None
+    return folder + "/" + os.path.basename(work_path)
 
 
 def extension(ctx=None):
@@ -100,18 +115,35 @@ def extension(ctx=None):
 
 
 def scene_stem(ctx=None):
-    """`AD1030_comp` -- entity and step, the studio's existing file convention."""
+    """`uat6_SEQ001_AD1030_lighting_jitesh` -- everything but the version.
+
+    Every component comes from the launch context; nothing here is entered by
+    an artist or inferred from the open scene. Case follows the source: the
+    project code and step are lowercased because that is how they appear in
+    the paths, while the sequence and shot keep ShotGrid's own casing.
+
+    A component the launch did not carry is dropped rather than filled with a
+    placeholder -- a name with a gap is still traceable, a name with "None" in
+    it is not.
+    """
     ctx = ctx or context.get()
-    bits = [b for b in (ctx.entity_name, (ctx.step or "").lower()) if b]
-    return "_".join(bits) or "untitled"
+    bits = [
+        (ctx.project_code or "").lower(),
+        ctx.sequence or "",
+        ctx.entity_name or "",
+        (ctx.step or "").lower(),
+        ctx.user or "",
+    ]
+    return "_".join(b for b in bits if b) or "untitled"
 
 
 def scene_name(version, ctx=None, ext=None):
-    """`AD1030_comp_v003.ma`."""
+    """`uat6_SEQ001_AD1030_lighting_jitesh_v0001.ma`."""
     ctx = ctx or context.get()
     if ext is None:
         ext = extension(ctx)
-    return "{0}_v{1:03d}{2}".format(scene_stem(ctx), int(version), ext)
+    return "{0}_v{1:0{2}d}{3}".format(scene_stem(ctx), int(version),
+                                      VERSION_PADDING, ext)
 
 
 def scene_path(version, ctx=None, ext=None):

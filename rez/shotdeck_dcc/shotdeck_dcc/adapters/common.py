@@ -37,9 +37,19 @@ def save(adapter):
 
 
 def save_as(adapter):
-    """Save to a path the artist picks, starting in this task's work folder."""
+    """Save to a path the artist picks, pre-filled with the correct name.
+
+    The dialog opens on the task's work folder with the next pipeline name
+    already in it, so the convention is what an artist gets by pressing
+    Enter -- Save As is for the exception, not for naming.
+    """
     start = paths.work_dir() or os.path.expanduser("~")
-    path = adapter.ask_path(start, paths.extension())
+    try:
+        suggested = os.path.basename(versioning.next_scene_path())
+    except ValueError:
+        suggested = ""                  # no task: let the host decide
+
+    path = adapter.ask_path(start, paths.extension(), suggested)
     if not path:
         return None                     # cancelled
 

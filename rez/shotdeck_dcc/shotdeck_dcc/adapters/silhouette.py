@@ -103,7 +103,7 @@ def confirm(text):
     return True
 
 
-def ask_path(start_dir, extension):
+def ask_path(start_dir, extension, suggested=""):
     """No confirmed file-dialog API. Callers get None, which cancels Save As."""
     message("Save As needs a file dialog, which this Silhouette build has not "
             "been confirmed to expose. Use Version Up, or run "

@@ -23,6 +23,17 @@ def latest_version(ctx=None, ext=None):
     return existing[-1] if existing else None
 
 
+def version_in(path):
+    """The version number written in a file name, or None.
+
+    Publishing reads the version back out of the file the DCC actually saved
+    rather than trusting the number it asked for, so a save that landed
+    somewhere unexpected is caught instead of silently republished.
+    """
+    match = paths.VERSION_RE.search(os.path.basename(path or ""))
+    return int(match.group(1)) if match else None
+
+
 def next_scene_path(ctx=None, ext=None, create_dir=False):
     """Absolute path the next save should use.
 
@@ -39,4 +50,12 @@ def next_scene_path(ctx=None, ext=None, create_dir=False):
     if create_dir and not os.path.isdir(folder):
         os.makedirs(folder)
 
-    return paths.scene_path(next_version(ctx, ext), ctx, ext)
+    path = paths.scene_path(next_version(ctx, ext), ctx, ext)
+    if os.path.exists(path):
+        # next_version() is one past the highest on disk, so this only fires
+        # when the scan missed a file -- a different extension, or someone
+        # saving into the folder at the same moment. Never overwrite.
+        raise ValueError(
+            "The next version already exists on disk:\n{0}\n\nSomeone may be "
+            "working in the same folder. Check before saving.".format(path))
+    return path

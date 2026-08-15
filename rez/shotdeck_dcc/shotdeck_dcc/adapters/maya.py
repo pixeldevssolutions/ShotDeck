@@ -77,13 +77,20 @@ def confirm(text):
         dismissString="Cancel") == "Publish"
 
 
-def ask_path(start_dir, extension):
-    """Save-file dialog, opened in the task's work folder."""
+def ask_path(start_dir, extension, suggested=""):
+    """Save-file dialog, opened on the work folder with the name pre-filled.
+
+    fileDialog2 has no separate default-name argument -- passing a full path
+    as startingDirectory is what pre-fills the name field.
+    """
+    import os
+
     cmds = _cmds()
     file_filter = ("Maya Files (*.ma *.mb)" if extension in (".ma", ".mb")
                    else "All Files (*.*)")
+    start = os.path.join(start_dir, suggested) if suggested else start_dir
     chosen = cmds.fileDialog2(fileMode=0, caption="ShotDeck: Save As",
-                              startingDirectory=start_dir,
+                              startingDirectory=start,
                               fileFilter=file_filter)
     return chosen[0] if chosen else None
 

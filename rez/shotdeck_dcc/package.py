@@ -32,13 +32,22 @@ def commands():
     env.SHOTDECK_DCC_ROOT = "{root}"
 
     # The startup hooks are wired per DCC, and only for the DCC that is
-    # actually in the resolve -- Maya's userSetup.py must never end up on
+    # actually being launched -- Maya's userSetup.py must never end up on
     # Nuke's PYTHONPATH, and NUKE_PATH means nothing to Maya.
-    if "maya" in resolve:
+    #
+    # Two signals, because either one alone has a hole: the resolve misses a
+    # studio that wraps the DCC under another package name, and the context
+    # variable is absent when someone runs `rez env maya shotdeck_dcc` by
+    # hand outside ShotDeck. Matching either is what makes the menu appear
+    # without anyone typing a Python command.
+    software = str(env.SHOTDECK_SOFTWARE).lower() \
+        if "SHOTDECK_SOFTWARE" in env else ""
+
+    if "maya" in resolve or software.startswith("maya"):
         # Maya executes any userSetup.py it finds on PYTHONPATH at startup.
         env.PYTHONPATH.prepend("{root}/startup/maya")
 
-    if "nuke" in resolve:
+    if "nuke" in resolve or software.startswith("nuke"):
         # Nuke scans every NUKE_PATH entry for init.py (always) and menu.py
         # (GUI sessions only).
         env.NUKE_PATH.prepend("{root}/startup/nuke")

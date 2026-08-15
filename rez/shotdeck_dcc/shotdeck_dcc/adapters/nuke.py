@@ -49,10 +49,10 @@ def confirm(text):
     return bool(_nuke().ask(text))
 
 
-def ask_path(start_dir, extension):
+def ask_path(start_dir, extension, suggested=""):
     chosen = _nuke().getFilename("ShotDeck: Save As",
                                  "*{0}".format(extension or ""),
-                                 default=start_dir + "/")
+                                 default=start_dir + "/" + suggested)
     return chosen or None
 
 

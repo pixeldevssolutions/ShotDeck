@@ -128,29 +128,48 @@ def prepare(ctx=None):
 def publish(adapter, ctx=None, description=""):
     """Run the whole pipeline. Returns a Result.
 
+    The publish name is taken from the scene the DCC actually saved, not from
+    the name we asked it to save under -- a host that redirects the save (a
+    workspace rule, a file-type change, an artist's own Save As mid-flight)
+    would otherwise publish a name that does not exist on disk.
+
     Raises PublishError only for failures *before* anything is written. Once
     the scene is saved, problems are reported on the Result instead.
     """
     ctx = ctx or context.get()
-    work_path, publish_path, version = prepare(ctx)
+    target, _, _ = prepare(ctx)
 
-    # -- save/version the scene
-    for folder in (os.path.dirname(work_path), os.path.dirname(publish_path)):
-        if not os.path.isdir(folder):
-            os.makedirs(folder)
+    # -- save the scene first
+    folder = os.path.dirname(target)
+    if not os.path.isdir(folder):
+        os.makedirs(folder)
 
     try:
-        adapter.save_scene(work_path)
+        adapter.save_scene(target)
     except Exception as e:
         raise PublishError("Could not save the scene to\n{0}\n\n{1}".format(
-            work_path, e))
+            target, e))
 
+    # -- get the actual saved filename, and the version written in it
+    work_path = adapter.current_scene() or target
     if not os.path.isfile(work_path):
         raise PublishError(
             "{0} reported a successful save but there is no file at\n{1}"
             .format(ctx.software or "The DCC", work_path))
 
-    # -- create the publish
+    version = versioning.version_in(work_path)
+    if version is None:
+        raise PublishError(
+            "The saved scene has no version in its name, so ShotDeck cannot "
+            "publish it:\n{0}\n\nUse Version Up to save a versioned scene "
+            "first.".format(work_path))
+
+    # -- create the publish directory, publish under the same name
+    publish_path = paths.publish_for(work_path, ctx)
+    publish_folder = os.path.dirname(publish_path)
+    if not os.path.isdir(publish_folder):
+        os.makedirs(publish_folder)
+
     shutil.copy2(work_path, publish_path)
 
     # -- validate the published file
