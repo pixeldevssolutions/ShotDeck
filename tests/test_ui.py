@@ -998,6 +998,26 @@ def test_the_logo_drops_its_white_ground_and_takes_the_theme_colour():
                 (ink.blue(), want.blue())])
 
 
+def test_the_splash_holds_its_minimum_even_when_startup_was_instant():
+    """A splash that flickers past on a warm cache is worse than none."""
+    from ui.branding import Splash, _fade_in
+
+    assert _fade_in(400, 800, 900) == 0.0        # before the stage starts
+    assert 0 < _fade_in(1200, 800, 900) < 1.0    # mid-stage
+    assert _fade_in(9000, 800, 900) == 1.0       # clamped after
+
+    splash = Splash("Loading Pipeline")
+    splash.MIN_MS = 10 ** 6                      # startup can never beat this
+    splash.show()
+    splash.finish(None)
+    assert splash._ready and not splash._closing
+
+    splash.MIN_MS = 0
+    splash._maybe_close()
+    assert splash._closing
+    splash.close()
+
+
 def test_tasks_show_the_pulsing_logo_until_the_query_answers():
     """An empty table during the wait reads as "no tasks", which is a lie."""
     from ui.software_page import TasksTable

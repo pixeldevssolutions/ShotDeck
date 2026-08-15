@@ -37,7 +37,7 @@ def main():
 
     # Up from here until the window is ready: connecting to ShotGrid and the
     # first project query together are seconds of nothing on a cold cache.
-    splash = Splash("Connecting to ShotGrid...")
+    splash = Splash("Loading Pipeline")
     splash.show()
     app.processEvents()
 
@@ -51,10 +51,12 @@ def main():
         QMessageBox.critical(None, "ShotDeck", str(e))
         return 1
 
+    splash.set_message("Preparing Workspace")
     win = MainWindow(sg, login=result.login, auth_result=result)
     if args.console:
         win.show_console()
-    win.show()
+    # The window is deliberately not shown here: finish() shows it behind the
+    # fade, so the projects appear as the splash goes rather than under it.
     splash.finish(win)
     return app.exec()
 
