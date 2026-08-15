@@ -13,6 +13,7 @@ Layout produced:
     <install>/startup/nuke/init.py         on NUKE_PATH when nuke is resolved
     <install>/startup/silhouette/          not wired yet -- see package.py
     <install>/probe_silhouette.py          run inside Silhouette to find its hook
+    <install>/verify_maya.py               run inside Maya to check the menu loaded
 """
 
 import os
@@ -24,7 +25,7 @@ PAYLOADS = [
     ("shotdeck_dcc", "python/shotdeck_dcc"),
     ("startup", "startup"),
 ]
-FILES = ["probe_silhouette.py"]
+FILES = ["probe_silhouette.py", "verify_maya.py"]
 
 
 def main():
