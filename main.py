@@ -7,6 +7,7 @@ import applog
 import auth
 from auth import login_dialog
 from sg_client import SGClient
+from ui.branding import Splash
 from ui.main_window import MainWindow
 
 
@@ -34,12 +35,19 @@ def main():
         return 1
     log.info("signed in as %s (%s)", result.login, result.method)
 
+    # Up from here until the window is ready: connecting to ShotGrid and the
+    # first project query together are seconds of nothing on a cold cache.
+    splash = Splash("Connecting to ShotGrid...")
+    splash.show()
+    app.processEvents()
+
     try:
         sg = SGClient()
     except Exception as e:
         # Most often a missing SG_SCRIPT_KEY; a dialog beats a traceback into
         # a terminal the artist never sees.
         log.error("could not connect to ShotGrid: %s", e)
+        splash.close()
         QMessageBox.critical(None, "ShotDeck", str(e))
         return 1
 
@@ -47,6 +55,7 @@ def main():
     if args.console:
         win.show_console()
     win.show()
+    splash.finish(win)
     return app.exec()
 
 

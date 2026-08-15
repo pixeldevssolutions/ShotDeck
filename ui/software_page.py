@@ -10,6 +10,7 @@ import config
 import paths
 import rez_scan
 from . import theme
+from .branding import LoadingPage
 from .widgets import Tile, EmptyState, StatusPill, DueDate
 
 TILE_WIDTH = 208
@@ -110,6 +111,7 @@ class TasksTable(QWidget):
         self._project = None         # needed to build folder paths
         self._statuses = []          # [(code, label), ...] from the SG schema
         self._latest = {}            # task id -> newest Version, one query
+        self._loading = False        # waiting on the first set_tasks()
         self._attention = {}         # task id -> why it needs attention
 
         lay = QVBoxLayout(self)
@@ -174,8 +176,22 @@ class TasksTable(QWidget):
             "match is configured.")
         self.stack.addWidget(self.empty)
 
+        self.loading = LoadingPage("Loading your tasks...")
+        self.stack.addWidget(self.loading)
+
+    def set_loading(self):
+        """Show the pulsing logo until set_tasks() says what actually arrived.
+
+        Without this the table shows the "no tasks assigned" empty state for as
+        long as the ShotGrid query takes, which reads as an answer rather than
+        a wait.
+        """
+        self._loading = True
+        self.stack.setCurrentWidget(self.loading)
+
     def set_tasks(self, tasks):
         self._tasks = tasks
+        self._loading = False
         self._rebuild()
 
     def _selected_task_id(self):
@@ -454,7 +470,8 @@ class TasksTable(QWidget):
             f"{shown} of {total}" if text and total else
             (f"{total} task{'s' if total != 1 else ''}" if total else ""))
         self.hint.setVisible(bool(shown))
-        self.stack.setCurrentWidget(self.table if shown else self.empty)
+        if not self._loading:
+            self.stack.setCurrentWidget(self.table if shown else self.empty)
 
 
 class SoftwarePage(QWidget):
@@ -518,6 +535,9 @@ class SoftwarePage(QWidget):
 
     def set_tasks(self, tasks):
         self.tasks.set_tasks(tasks)
+
+    def set_loading(self):
+        self.tasks.set_loading()
 
     def select_task(self, task_id):
         """Show the My Tasks tab with this task selected. False if unknown."""

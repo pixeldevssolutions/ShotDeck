@@ -977,6 +977,43 @@ def test_the_header_shows_the_signed_in_user():
     assert chip.avatar.text() == "JG"
 
 
+def test_the_logo_drops_its_white_ground_and_takes_the_theme_colour():
+    """The asset is black on opaque white; untinted it is a white brick."""
+    from ui import branding, theme
+
+    img = branding.logo_pixmap(120).toImage()
+    alphas = [img.pixelColor(x, y).alpha()
+              for y in range(img.height()) for x in range(img.width())]
+    clear = sum(1 for a in alphas if a < 40)
+    assert clear > len(alphas) * 0.6         # the ground really is gone
+    assert max(alphas) > 200                 # the mark itself is still solid
+
+    ink = next(img.pixelColor(x, y)
+               for y in range(img.height()) for x in range(img.width())
+               if img.pixelColor(x, y).alpha() > 200)
+    want = QColor(theme.TEXT)
+    # Premultiplied storage rounds each channel, so this is near, not equal.
+    assert all(abs(a - b) <= 4 for a, b in
+               [(ink.red(), want.red()), (ink.green(), want.green()),
+                (ink.blue(), want.blue())])
+
+
+def test_tasks_show_the_pulsing_logo_until_the_query_answers():
+    """An empty table during the wait reads as "no tasks", which is a lie."""
+    from ui.software_page import TasksTable
+
+    table = TasksTable()
+    table.set_loading()
+    assert table.stack.currentWidget() is table.loading
+
+    # A filter keystroke mid-flight must not swap the wait for an empty state.
+    table.search.setText("comp")
+    assert table.stack.currentWidget() is table.loading
+
+    table.set_tasks([])
+    assert table.stack.currentWidget() is table.empty
+
+
 def test_the_profile_menu_says_who_and_how():
     win = _window()
     rows = dict(win._user_details())

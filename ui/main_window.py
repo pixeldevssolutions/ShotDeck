@@ -398,7 +398,7 @@ class MainWindow(QMainWindow):
         self.back_btn.show()
         self.stack.setCurrentWidget(self.software_page)
         self.software_page.set_software([])
-        self.software_page.set_tasks([])
+        self.software_page.set_loading()
         self.statusBar().showMessage("Loading apps and tasks...")
 
         self._run(self.sg.software_for_project, self._on_software, project)
