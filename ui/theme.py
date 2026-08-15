@@ -68,6 +68,11 @@ QMainWindow, QWidget {{
 
 /* ---- header ---- */
 #header {{ background: {SURFACE}; border-bottom: 1px solid {BORDER}; }}
+/* The QWidget rule above paints every label {BG}, which on the {SURFACE}
+   header shows as a dark block whose edge reads as a divider. Labels here are
+   transparent; the avatar needs two ids to out-rank that and keep its fill. */
+#header QLabel {{ background: transparent; }}
+#header #avatar {{ background: {ACCENT_SUNK}; }}
 #headerTitle {{ font-size: 16px; font-weight: 600; color: {TEXT}; }}
 #crumb {{ color: {TEXT_FAINT}; font-size: 16px; padding: 0 2px; }}
 #backBtn {{
