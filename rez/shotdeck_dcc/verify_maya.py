@@ -151,7 +151,7 @@ def main():
     print("ShotDeck integration check -- Maya")
     print("=" * 70)
 
-    failed = 0
+    passed = failed = 0
     for label, func in CHECKS:
         try:
             ok, detail = func()
@@ -160,18 +160,30 @@ def main():
         print("{0}  {1}".format("PASS" if ok else "FAIL", label))
         if detail:
             print("      {0}".format(detail))
-        if not ok:
-            failed += 1
-            if label == CHECKS[0][0]:
-                print("\nStopping: nothing else can pass while the import fails.")
-                break
+        if ok:
+            passed += 1
+            continue
+
+        failed += 1
+        if label == CHECKS[0][0]:
+            print("\nStopping: nothing else can pass while the import fails.")
+            break
 
     print("-" * 70)
-    print("{0} of {1} checks passed".format(len(CHECKS) - failed, len(CHECKS)))
+    skipped = len(CHECKS) - passed - failed
+    summary = "{0} of {1} checks passed".format(passed, len(CHECKS))
+    if skipped:
+        summary += ", {0} not run".format(skipped)
+    print(summary)
     return failed
 
 
-if __name__ == "__main__":
-    sys.exit(1 if main() else 0)
-else:
-    main()          # exec()'d into the Script Editor: run on the way in
+# Maya's Script Editor execs with __name__ == "__main__" and no __file__, so
+# __name__ alone cannot tell a real command-line run from a paste -- and
+# sys.exit() inside the Script Editor surfaces as "# Error: SystemExit".
+_AS_SCRIPT = (__name__ == "__main__"
+              and globals().get("__file__", "").endswith("verify_maya.py"))
+
+_failed = main()
+if _AS_SCRIPT:
+    sys.exit(1 if _failed else 0)

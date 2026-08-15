@@ -26,6 +26,18 @@ LAYOUT = {
 }
 DEFAULT_LAYOUT = ("{software}/{step}/scene", "")
 
+# Where a published scene lands, per DCC. Publishes sit beside the work
+# folder rather than inside it, so "everything under publish/ is safe to
+# reference" stays true no matter what an artist saves next door.
+PUBLISH_LAYOUT = {
+    "maya": "maya/publish/{step}",
+    "nuke": "nuke/{step}/publish",
+    "silhouette": "silhouette/{step}/publish",
+    "houdini": "houdini/publish/{step}",
+    "blender": "blender/publish/{step}",
+}
+DEFAULT_PUBLISH_LAYOUT = "{software}/{step}/publish"
+
 VERSION_RE = re.compile(r"_v(\d+)", re.IGNORECASE)
 
 
@@ -51,6 +63,34 @@ def work_dir(ctx=None):
     # Collapse the empty {step} rather than leaving a // in the path.
     parts = [p for p in relative.split("/") if p]
     return "/".join([root] + parts)
+
+
+def publish_dir(ctx=None):
+    """Folder published scenes belong in. None when the launch had no entity."""
+    ctx = ctx or context.get()
+    root = (ctx.entity_root or "").rstrip("/")
+    if not root:
+        return None
+
+    template = PUBLISH_LAYOUT.get((ctx.software or "").lower(),
+                                  DEFAULT_PUBLISH_LAYOUT)
+    relative = template.format(step=(ctx.step or "").lower(),
+                               software=(ctx.software or "dcc").lower())
+    parts = [p for p in relative.split("/") if p]
+    return "/".join([root] + parts)
+
+
+def publish_path(version, ctx=None, ext=None):
+    """Absolute path a published version lands at, or None without a task.
+
+    Same file name as the work file it came from: the version number is the
+    link between the two, and renaming on publish only makes them hard to
+    match up later.
+    """
+    folder = publish_dir(ctx)
+    if not folder:
+        return None
+    return folder + "/" + scene_name(version, ctx, ext)
 
 
 def extension(ctx=None):

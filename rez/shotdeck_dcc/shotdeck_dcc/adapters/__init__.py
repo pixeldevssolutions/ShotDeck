@@ -10,12 +10,21 @@ The menu itself is described once, in ACTIONS, so the hosts differ only in how
 they build menus rather than in what is on them.
 """
 
-# (label, callable name on the adapter module)
+# (label, callable name on the adapter module). None is a separator.
+#
+# Grouped by what the artist is doing: working on the scene, handing it off,
+# then finding things. Publish sits alone between the two so it is hard to hit
+# by accident.
 ACTIONS = [
-    ("Save Next Version", "action_save_next_version"),
+    ("Save", "action_save"),
+    ("Save As...", "action_save_as"),
+    ("Version Up", "action_version_up"),
+    (None, None),
+    ("Publish...", "action_publish"),
+    (None, None),
     ("Open Work Folder", "action_open_work_folder"),
-    (None, None),                     # separator
-    ("Show ShotDeck Context", "action_show_context"),
+    ("Open Publish Folder", "action_open_publish_folder"),
+    ("Context", "action_context"),
 ]
 
 MENU_NAME = "ShotDeck"

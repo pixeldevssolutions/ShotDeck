@@ -92,6 +92,25 @@ def message(text):
     sys.stdout.write("ShotDeck: {0}\n".format(text))
 
 
+def confirm(text):
+    """No confirmed dialog API, so a console prompt would block the UI.
+
+    Returning True means Publish proceeds without asking here. The publish is
+    still driven from the script console rather than a menu, which is its own
+    confirmation -- nobody types the call by accident.
+    """
+    message(text)
+    return True
+
+
+def ask_path(start_dir, extension):
+    """No confirmed file-dialog API. Callers get None, which cancels Save As."""
+    message("Save As needs a file dialog, which this Silhouette build has not "
+            "been confirmed to expose. Use Version Up, or run "
+            "shotdeck_dcc.publish.save_next_version() from the console.")
+    return None
+
+
 def common_log(text):
     from .. import log
     log.warning(text)
@@ -99,13 +118,29 @@ def common_log(text):
 
 # -- menu actions ---------------------------------------------------------
 
-def action_save_next_version():
-    return common.save_next_version(sys.modules[__name__])
+def action_save():
+    return common.save(sys.modules[__name__])
+
+
+def action_save_as():
+    return common.save_as(sys.modules[__name__])
+
+
+def action_version_up():
+    return common.version_up(sys.modules[__name__])
+
+
+def action_publish():
+    return common.publish_scene(sys.modules[__name__])
 
 
 def action_open_work_folder():
     return common.open_work_folder(sys.modules[__name__])
 
 
-def action_show_context():
+def action_open_publish_folder():
+    return common.open_publish_folder(sys.modules[__name__])
+
+
+def action_context():
     return common.show_context(sys.modules[__name__])

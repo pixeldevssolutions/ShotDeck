@@ -4,8 +4,8 @@ Maya executes every userSetup.py it finds on PYTHONPATH once the GUI is up.
 package.py only puts this folder on PYTHONPATH when maya is in the resolve, so
 it never loads inside another DCC.
 
-The menu build is deferred: at the time userSetup.py runs, $gMainWindow does
-not exist yet and cmds.menu(parent=...) fails.
+The menu build is deferred and lives in menu.py: at the time userSetup.py
+runs, $gMainWindow does not exist yet and cmds.menu(parent=...) fails.
 """
 
 import traceback
@@ -13,8 +13,8 @@ import traceback
 
 def _install():
     try:
-        import shotdeck_dcc
-        shotdeck_dcc.install()
+        import menu
+        menu.install()
     except Exception:
         # Never let a menu take Maya down with it -- print and carry on.
         traceback.print_exc()

@@ -41,7 +41,9 @@ class Context(object):
         self.entity_type = task.get("entity_type") or _env("SHOTDECK_ENTITY_TYPE")
         self.entity_id = task.get("entity_id") or _int("SHOTDECK_ENTITY_ID")
         self.entity_name = task.get("entity_name") or _env("SHOTDECK_ENTITY_NAME")
+        self.sequence = data.get("sequence") or _env("SHOTDECK_SEQUENCE")
         self.user = _env("SHOTDECK_USER")
+        self.site = data.get("site") or _env("SHOTDECK_SITE")
         # Written by ShotDeck, which already knows the templates. The DCC side
         # deliberately does not re-derive it -- one convention, one place.
         self.entity_root = _env("SHOTDECK_ENTITY_ROOT")
@@ -66,16 +68,19 @@ class Context(object):
                     self.step, self.software))
 
     def summary(self):
-        """Multi-line text for the "Show context" menu action."""
+        """The Context panel: pipeline coordinates, in reading order.
+
+        Deliberately not every variable -- this is what an artist reads to
+        answer "am I in the right shot", so it stops at the step.
+        """
         rows = [
             ("Project", self.project_name),
-            ("Entity", "{0} ({1})".format(self.entity_name, self.entity_type)
-             if self.entity_type else self.entity_name),
+            ("Sequence", self.sequence),
+            (self.entity_type or "Entity", self.entity_name),
             ("Task", self.task_name),
             ("Step", self.step),
-            ("Software", "{0} {1}".format(self.software, self.software_version)
-             .strip()),
-            ("Work folder", self.entity_root or "(not set)"),
+            ("Software", "{0} {1}".format(self.software,
+                                          self.software_version).strip()),
             ("User", self.user),
         ]
         return "\n".join("{0:<12}{1}".format(k, v or "-") for k, v in rows)

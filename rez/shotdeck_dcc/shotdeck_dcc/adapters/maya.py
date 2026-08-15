@@ -69,15 +69,50 @@ def message(text):
         cmds.confirmDialog(title="ShotDeck", message=text, button=["Close"])
 
 
+def confirm(text):
+    """Yes/no before something that writes. Defaults to Cancel."""
+    return _cmds().confirmDialog(
+        title="ShotDeck", message=text, button=["Publish", "Cancel"],
+        defaultButton="Cancel", cancelButton="Cancel",
+        dismissString="Cancel") == "Publish"
+
+
+def ask_path(start_dir, extension):
+    """Save-file dialog, opened in the task's work folder."""
+    cmds = _cmds()
+    file_filter = ("Maya Files (*.ma *.mb)" if extension in (".ma", ".mb")
+                   else "All Files (*.*)")
+    chosen = cmds.fileDialog2(fileMode=0, caption="ShotDeck: Save As",
+                              startingDirectory=start_dir,
+                              fileFilter=file_filter)
+    return chosen[0] if chosen else None
+
+
 # -- menu actions ---------------------------------------------------------
 
-def action_save_next_version():
-    return common.save_next_version(sys.modules[__name__])
+def action_save():
+    return common.save(sys.modules[__name__])
+
+
+def action_save_as():
+    return common.save_as(sys.modules[__name__])
+
+
+def action_version_up():
+    return common.version_up(sys.modules[__name__])
+
+
+def action_publish():
+    return common.publish_scene(sys.modules[__name__])
 
 
 def action_open_work_folder():
     return common.open_work_folder(sys.modules[__name__])
 
 
-def action_show_context():
+def action_open_publish_folder():
+    return common.open_publish_folder(sys.modules[__name__])
+
+
+def action_context():
     return common.show_context(sys.modules[__name__])
