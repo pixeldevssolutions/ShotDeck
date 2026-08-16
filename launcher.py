@@ -36,6 +36,7 @@ def launch(project, software, login=None, email=None, task=None):
         "SGDESK_USER_EMAIL": email or "",
     }
     extra.update(ctx_mod.env(ctx, ctx_path))
+    extra.update(_tools_paths(software))
     env = build_env(project, software, extra=extra)
 
     name = software.get("code") or "app"
@@ -150,6 +151,43 @@ def _rez_packages(software):
                 "%s is not released yet — launching without it. %s. Build it "
                 "with: cd rez/%s && rez build -ic", name, cost, name)
     return pkgs
+
+
+def _tools_paths(software):
+    """PYTHONPATH/NUKE_PATH entries that make the in-DCC menu load itself.
+
+    The rez package does this when it resolves, but it only resolves when the
+    Software entity requests rez packages at all and the package has been
+    released. A DCC launched straight from linux_path got neither, which is why
+    the menu was missing until someone typed the import by hand. Pointing at
+    the source tree costs nothing when the package is resolved: rez prepends
+    its own copy, so its version is the one that wins.
+
+    The "+" suffix is env_resolver's prepend syntax, so an existing PYTHONPATH
+    from default.yml or a project YAML is kept.
+    """
+    code = (software.get("code") or "").lower().replace(" ", "")
+    dcc_root = config.DCC_SOURCE_ROOT
+
+    out = {}
+    roots = [dcc_root, config.CONTEXT_SOURCE_ROOT]
+    if code.startswith("maya"):
+        # Maya runs any userSetup.py it finds on PYTHONPATH once the GUI is up.
+        roots.append(os.path.join(dcc_root, "startup", "maya"))
+    if code.startswith("nuke"):
+        # Nuke reads init.py/menu.py off NUKE_PATH instead.
+        nuke_startup = os.path.join(dcc_root, "startup", "nuke")
+        if os.path.isdir(nuke_startup):
+            out["NUKE_PATH+"] = nuke_startup
+
+    roots = [p for p in roots if os.path.isdir(p)]
+    if not roots:
+        log.warning("in-DCC tools not found at %s — the ShotDeck menu will "
+                    "not appear. Set SHOTDECK_DCC_SOURCE.", dcc_root)
+        return out
+
+    out["PYTHONPATH+"] = os.pathsep.join(roots)
+    return out
 
 
 def _preflight(cmd, software):

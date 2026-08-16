@@ -395,4 +395,16 @@ DCC_LABELS = {
 # Per-project env YAMLs live here; falls back to default.yml
 ENVS_DIR = os.path.join(os.path.dirname(__file__), "envs")
 
+# Source tree of the in-DCC tools, laid out the same way the rez package
+# installs them (shotdeck_dcc/ importable, startup/<dcc>/ per host). Launches
+# point PYTHONPATH here so the menu appears even when the rez package is not
+# released or the Software entity requests no rez packages at all. A resolved
+# shotdeck_dcc prepends its own copy, so it still wins when present.
+DCC_SOURCE_ROOT = os.environ.get(
+    "SHOTDECK_DCC_SOURCE",
+    os.path.join(os.path.dirname(__file__), "rez", "shotdeck_dcc"))
+CONTEXT_SOURCE_ROOT = os.environ.get(
+    "SHOTDECK_CONTEXT_SOURCE",
+    os.path.join(os.path.dirname(__file__), "rez", "shotdeck_context"))
+
 APP_TITLE = "PixelDesk"

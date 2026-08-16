@@ -44,6 +44,7 @@ MODULES = [
     "test_sg_client",
     "test_auth",
     "test_dcc",
+    "test_launch_env",
     "test_ui",
 ]
 
