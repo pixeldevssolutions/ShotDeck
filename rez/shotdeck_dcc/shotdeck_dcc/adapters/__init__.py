@@ -27,4 +27,4 @@ ACTIONS = [
     ("Context", "action_context"),
 ]
 
-MENU_NAME = "ShotDeck"
+MENU_NAME = "5and8"
