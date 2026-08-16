@@ -36,7 +36,11 @@ def launch(project, software, login=None, email=None, task=None):
         "SGDESK_USER_EMAIL": email or "",
     }
     extra.update(ctx_mod.env(ctx, ctx_path))
-    extra.update(_tools_paths(software))
+    # Resolved once and passed on: _tools_paths() only fills what rez is not
+    # already providing, and _build_command() must request exactly the same set.
+    rez_pkgs = _rez_packages(software)
+    tools = _tools_paths(software, rez_pkgs)
+    extra.update(tools)
     env = build_env(project, software, extra=extra)
 
     name = software.get("code") or "app"
@@ -48,9 +52,16 @@ def launch(project, software, login=None, email=None, task=None):
     if software.get("sg_external_ui"):
         cmd = _external_ui_command(software)
     else:
-        cmd = _build_command(software)
+        cmd = _build_command(software, rez_pkgs)
 
     _preflight(cmd, software)
+    _keep_tools_paths_through_rez(cmd, env, tools)
+
+    log.info("in-DCC tools: %s", config.DCC_SOURCE_ROOT)
+    log.info("context package: %s", config.CONTEXT_SOURCE_ROOT)
+    log.info("PYTHONPATH: %s", env.get("PYTHONPATH", ""))
+    if env.get("NUKE_PATH"):
+        log.info("NUKE_PATH: %s", env["NUKE_PATH"])
 
     log_path = applog.launch_log_path(name)
     log.info("command: %s", _quote(cmd))
@@ -95,7 +106,7 @@ def launch_package(project, package, version=None, task=None,
     return launch(project, software, login=login, email=email, task=task)
 
 
-def _build_command(software):
+def _build_command(software, rez_pkgs=None):
     """Resolve the Software entity into an argv list.
 
     With rez packages set, the app runs as `rez env <pkgs> -- <cmd> <args>`.
@@ -103,7 +114,8 @@ def _build_command(software):
     absolute path, since the rez packages put it on PATH; without rez packages
     it must be a real path, because nothing else resolves it.
     """
-    rez_pkgs = _rez_packages(software)
+    if rez_pkgs is None:
+        rez_pkgs = _rez_packages(software)
     exe = (software.get("linux_path") or "").strip()
     args = shlex.split(software.get("linux_args") or "")
 
@@ -153,24 +165,39 @@ def _rez_packages(software):
     return pkgs
 
 
-def _tools_paths(software):
-    """PYTHONPATH/NUKE_PATH entries that make the in-DCC menu load itself.
+def _tools_paths(software, rez_pkgs=()):
+    """PYTHONPATH/NUKE_PATH entries for whatever rez is not already providing.
 
-    The rez package does this when it resolves, but it only resolves when the
-    Software entity requests rez packages at all and the package has been
-    released. A DCC launched straight from linux_path got neither, which is why
-    the menu was missing until someone typed the import by hand. Pointing at
-    the source tree costs nothing when the package is resolved: rez prepends
-    its own copy, so its version is the one that wins.
+    Rez first: a package in `rez_pkgs` is resolved by rez, which puts its own
+    installed copy on PYTHONPATH and wires the host's startup mechanism, so
+    ShotDeck adds nothing for it -- no second copy of the tools, no second
+    userSetup.py, nothing that could shadow a released version.
 
-    The "+" suffix is env_resolver's prepend syntax, so an existing PYTHONPATH
-    from default.yml or a project YAML is kept.
+    The source tree fills the gap until then. `shotdeck_dcc` is only injected
+    into a request when the Software entity asks for rez packages at all and
+    the package has been built (see _rez_packages), so a DCC launched straight
+    from linux_path, or launched before the packages are released, gets nothing
+    in-DCC -- which is why the menu was missing until someone typed the import
+    by hand.
+
+    The "+" suffix is build_env()'s own prepend syntax -- it strips the "+" and
+    puts the value in front of whatever the key already holds -- so an existing
+    PYTHONPATH from os.environ, default.yml or a project YAML is kept.
     """
+    resolved = {p.split("-")[0] for p in rez_pkgs}
     code = (software.get("code") or "").lower().replace(" ", "")
     dcc_root = config.DCC_SOURCE_ROOT
-
     out = {}
-    roots = [dcc_root, config.CONTEXT_SOURCE_ROOT]
+
+    if config.REZ_DCC_PACKAGE and config.REZ_DCC_PACKAGE in resolved:
+        log.info("%s is resolved by rez — using the released package",
+                 config.REZ_DCC_PACKAGE)
+        return out
+
+    roots = [dcc_root]
+    if not (config.REZ_CONTEXT_PACKAGE and
+            config.REZ_CONTEXT_PACKAGE in resolved):
+        roots.append(config.CONTEXT_SOURCE_ROOT)
     if code.startswith("maya"):
         # Maya runs any userSetup.py it finds on PYTHONPATH once the GUI is up.
         roots.append(os.path.join(dcc_root, "startup", "maya"))
@@ -186,8 +213,39 @@ def _tools_paths(software):
                     "not appear. Set SHOTDECK_DCC_SOURCE.", dcc_root)
         return out
 
+    log.info("%s not in the rez resolve — falling back to the source tree",
+             config.REZ_DCC_PACKAGE)
     out["PYTHONPATH+"] = os.pathsep.join(roots)
     return out
+
+
+def _keep_tools_paths_through_rez(cmd, env, tools):
+    """Stop `rez env` from dropping the fallback paths _tools_paths() set.
+
+    rez resets any variable a resolved package writes to, so maya's own
+    PYTHONPATH.prepend wipes what ShotDeck put there before the DCC ever
+    starts -- which is why the source tree was missing from Maya's PYTHONPATH
+    even when the launch environment held it. Variables named in
+    parent_variables are inherited instead of reset; REZ_PARENT_VARIABLES is
+    the environment override for that setting.
+
+    Only the variables ShotDeck actually filled are asked for, and only when
+    the fallback is in play: with shotdeck_dcc in the resolve `tools` is empty
+    and rez's environment is left exactly as it is today. Nothing here forces a
+    rez launch either -- it edits the environment of a command that is already
+    `rez env`.
+    """
+    wanted = [k[:-1] for k in tools if k.endswith("+")]
+    if not wanted:
+        return
+    if os.path.basename(cmd[0]) != os.path.basename(config.REZ_EXECUTABLE):
+        return
+
+    keep = [v for v in env.get("REZ_PARENT_VARIABLES", "").split(",") if v]
+    for name in wanted:
+        if name not in keep:
+            keep.append(name)
+    env["REZ_PARENT_VARIABLES"] = ",".join(keep)
 
 
 def _preflight(cmd, software):
