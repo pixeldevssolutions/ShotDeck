@@ -1,4 +1,5 @@
 import os
+import threading
 
 import shotgun_api3
 
@@ -49,6 +50,7 @@ def _media_fields(info):
 class SGClient:
     def __init__(self):
         self._reset_caches()
+        self._local = threading.local()
         if os.environ.get("SGDESK_DEV") == "1":
             from sgdesk_dcc.devkit.mock_sg import MockShotgun
             self.sg = MockShotgun()
@@ -57,11 +59,46 @@ class SGClient:
             raise RuntimeError(
                 "SG_SCRIPT_KEY is not set. Export it before starting ShotDeck "
                 )
-        self.sg = shotgun_api3.Shotgun(
-            config.SG_SITE,
-            script_name=config.SG_SCRIPT_NAME,
-            api_key=config.SG_SCRIPT_KEY,
-        )
+
+    @property
+    def sg(self):
+        """The ShotGrid connection for the calling thread.
+
+        One connection per thread, not one per client. shotgun_api3 keeps a
+        single httplib2 connection per instance and is not thread-safe: two
+        ui/jobs.py workers sharing one -- the review query and the latest-version
+        query, say -- can have one thread reading a response while the other
+        closes the same SSL socket. That corrupts the heap and aborts the
+        process ("free(): invalid next size"), with no Python traceback beyond
+        what faulthandler prints.
+
+        A lock would also be correct, but it would serialise the four queries
+        the bootstrap deliberately runs at once. Pool threads are reused, so
+        the number of connections stays bounded by the pool size.
+        """
+        override = getattr(self, "_sg_override", None)
+        if override is not None:
+            return override
+
+        local = getattr(self, "_local", None)
+        if local is None:                    # built by fakes without __init__
+            local = self._local = threading.local()
+
+        conn = getattr(local, "conn", None)
+        if conn is None:
+            conn = local.conn = shotgun_api3.Shotgun(
+                config.SG_SITE,
+                script_name=config.SG_SCRIPT_NAME,
+                api_key=config.SG_SCRIPT_KEY,
+            )
+            log.debug("opened a ShotGrid connection for thread %s",
+                      threading.current_thread().name)
+        return conn
+
+    @sg.setter
+    def sg(self, value):
+        """Pin one connection for every thread: the dev mock and the tests."""
+        self._sg_override = value
 
     def _reset_caches(self):
         self._owner = None

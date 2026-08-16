@@ -182,3 +182,57 @@ def test_delete_version_removes_it():
     version = sg.add_version("SH010_Comp_v001")
     fakes.client(sg).delete_version(version["id"])
     assert sg.deleted == [("Version", version["id"])]
+
+
+def test_every_thread_gets_its_own_shotgrid_connection():
+    """Sharing one connection across ui/jobs.py workers corrupts the heap.
+
+    shotgun_api3 keeps a single httplib2 connection per instance. Two workers
+    using it at once -- one reading a response while the other closes the SSL
+    socket -- aborted the process with "free(): invalid next size" before any
+    project appeared. Nothing above this notices, so the check lives here.
+    """
+    import threading
+
+    import sg_client
+
+    made = []
+
+    class FakeConnection:
+        def __init__(self, *args, **kwargs):
+            made.append(self)
+
+    real = sg_client.shotgun_api3.Shotgun
+    old_key = config.SG_SCRIPT_KEY
+    config.SG_SCRIPT_KEY = "test-key-not-real"
+    sg_client.shotgun_api3.Shotgun = FakeConnection
+    try:
+        client = sg_client.SGClient()
+        assert not made            # nothing connects until a call needs to
+
+        seen = {}
+
+        def grab(name):
+            seen[name] = client.sg
+
+        threads = [threading.Thread(target=grab, args=(i,)) for i in range(3)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert len(seen) == 3
+        assert len({id(conn) for conn in seen.values()}) == 3
+        assert client.sg is client.sg        # one per thread, not one per call
+
+        # The dev mock and the tests pin a single connection for every thread.
+        pinned = FakeConnection()
+        client.sg = pinned
+        got = {}
+        t = threading.Thread(target=lambda: got.update(sg=client.sg))
+        t.start()
+        t.join()
+        assert client.sg is pinned and got["sg"] is pinned
+    finally:
+        sg_client.shotgun_api3.Shotgun = real
+        config.SG_SCRIPT_KEY = old_key

@@ -103,6 +103,11 @@ SOFTWARE_REZ_FIELD = "sg_rez_packages"
 # Package appended to every rez request so in-DCC tools can `import
 # shotdeck_context`. Set to "" to stop injecting it.
 REZ_CONTEXT_PACKAGE = "shotdeck_context"
+# Package that carries the in-DCC tools and their startup hooks. Appended the
+# same way, so launching a DCC is the whole install -- no artist ever copies a
+# userSetup.py. It requires shotdeck_context, so injecting it pulls in both.
+# Set to "" to launch DCCs without the ShotDeck menu.
+REZ_DCC_PACKAGE = "shotdeck_dcc"
 
 # -- standalone publish ----------------------------------------------------
 
@@ -389,5 +394,17 @@ DCC_LABELS = {
 
 # Per-project env YAMLs live here; falls back to default.yml
 ENVS_DIR = os.path.join(os.path.dirname(__file__), "envs")
+
+# Source tree of the in-DCC tools, laid out the same way the rez package
+# installs them (shotdeck_dcc/ importable, startup/<dcc>/ per host). Launches
+# point PYTHONPATH here so the menu appears even when the rez package is not
+# released or the Software entity requests no rez packages at all. A resolved
+# shotdeck_dcc prepends its own copy, so it still wins when present.
+DCC_SOURCE_ROOT = os.environ.get(
+    "SHOTDECK_DCC_SOURCE",
+    os.path.join(os.path.dirname(__file__), "rez", "shotdeck_dcc"))
+CONTEXT_SOURCE_ROOT = os.environ.get(
+    "SHOTDECK_CONTEXT_SOURCE",
+    os.path.join(os.path.dirname(__file__), "rez", "shotdeck_context"))
 
 APP_TITLE = "PixelDesk"

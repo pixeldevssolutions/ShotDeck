@@ -36,6 +36,7 @@ def launch(project, software, login=None, email=None, task=None):
         "SGDESK_USER_EMAIL": email or "",
     }
     extra.update(ctx_mod.env(ctx, ctx_path))
+    extra.update(_tools_paths(software))
     env = build_env(project, software, extra=extra)
 
     name = software.get("code") or "app"
@@ -120,30 +121,73 @@ def _build_command(software):
     return [exe] + args
 
 
-def _rez_packages(software):
-    """Requested packages, plus the context package when it is released.
+# (package, what is lost when it has not been released yet)
+_INJECTED_PACKAGES = [
+    (config.REZ_CONTEXT_PACKAGE,
+     "In-DCC tools must fall back to the SHOTDECK_* variables"),
+    (config.REZ_DCC_PACKAGE,
+     "The ShotDeck menu will not appear inside the DCC"),
+]
 
-    Asking for a package that doesn't exist makes rez reject the whole
-    resolve, so an unbuilt shotdeck_context would block every launch. The
-    SHOTDECK_* variables carry the context regardless, so skipping it costs
-    only the convenience of `import shotdeck_context`.
+
+def _rez_packages(software):
+    """Requested packages, plus ShotDeck's own when they are released.
+
+    Asking for a package that doesn't exist makes rez reject the whole resolve,
+    so an unbuilt shotdeck_dcc would block every launch. Both are therefore
+    optional: the launch still works, it just arrives with less.
     """
     pkgs = (software.get(config.SOFTWARE_REZ_FIELD) or "").split()
     if not pkgs:
         return []
 
-    ctx_pkg = config.REZ_CONTEXT_PACKAGE
-    if not ctx_pkg or any(p.split("-")[0] == ctx_pkg for p in pkgs):
-        return pkgs
-
-    if rez_scan.is_available(ctx_pkg):
-        pkgs.append(ctx_pkg)
-    else:
-        log.warning(
-            "%s is not released yet — launching without it. In-DCC tools must "
-            "fall back to the SHOTDECK_* variables. Build it with: "
-            "cd rez/%s && rez build -ic", ctx_pkg, ctx_pkg)
+    for name, cost in _INJECTED_PACKAGES:
+        if not name or any(p.split("-")[0] == name for p in pkgs):
+            continue
+        if rez_scan.is_available(name):
+            pkgs.append(name)
+        else:
+            log.warning(
+                "%s is not released yet — launching without it. %s. Build it "
+                "with: cd rez/%s && rez build -ic", name, cost, name)
     return pkgs
+
+
+def _tools_paths(software):
+    """PYTHONPATH/NUKE_PATH entries that make the in-DCC menu load itself.
+
+    The rez package does this when it resolves, but it only resolves when the
+    Software entity requests rez packages at all and the package has been
+    released. A DCC launched straight from linux_path got neither, which is why
+    the menu was missing until someone typed the import by hand. Pointing at
+    the source tree costs nothing when the package is resolved: rez prepends
+    its own copy, so its version is the one that wins.
+
+    The "+" suffix is env_resolver's prepend syntax, so an existing PYTHONPATH
+    from default.yml or a project YAML is kept.
+    """
+    code = (software.get("code") or "").lower().replace(" ", "")
+    dcc_root = config.DCC_SOURCE_ROOT
+
+    out = {}
+    roots = [dcc_root, config.CONTEXT_SOURCE_ROOT]
+    if code.startswith("maya"):
+        # Maya runs any userSetup.py it finds on PYTHONPATH once the GUI is up.
+        roots.append(os.path.join(dcc_root, "startup", "maya"))
+    if code.startswith("nuke"):
+        # Nuke reads init.py/menu.py off NUKE_PATH instead.
+        nuke_startup = os.path.join(dcc_root, "startup", "nuke")
+        if os.path.isdir(nuke_startup):
+            out["NUKE_PATH+"] = nuke_startup
+
+    roots = [p for p in roots if os.path.isdir(p)]
+    if not roots:
+        log.warning("in-DCC tools not found at %s — the ShotDeck menu will "
+                    "not appear. Set SHOTDECK_DCC_SOURCE.", dcc_root)
+        return out
+
+    out["PYTHONPATH+"] = os.pathsep.join(roots)
+    return out
 
 
 def _preflight(cmd, software):
