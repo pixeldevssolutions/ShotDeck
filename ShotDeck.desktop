@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=ShotDeck
+GenericName=Pipeline Launcher
+Comment=Browse ShotGrid tasks and launch DCCs
+Exec=/software/pipeline/ShotDeck/launch_shotdeck.sh
+Icon=/software/pipeline/ShotDeck/shotdeck.png
+Path=/software/pipeline/ShotDeck
+Terminal=false
+StartupNotify=true
+Categories=Graphics;AudioVideo;Utility;
+Keywords=shotgrid;vfx;pipeline;maya;nuke;

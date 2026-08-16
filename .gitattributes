@@ -1,0 +1,5 @@
+# These are checked out onto the Rocky 9 farm and executed there. With
+# core.autocrlf=true on a Windows checkout they would arrive with CRLF and die
+# on `bash: $'\r': command not found`, so pin them to LF everywhere.
+*.sh text eol=lf
+*.desktop text eol=lf
