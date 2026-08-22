@@ -56,31 +56,32 @@ def ask_path(start_dir, extension, suggested=""):
     return chosen or None
 
 
+# -- Deadline -------------------------------------------------------------
+
+def frame_range():
+    root = _nuke().root()
+    return int(root.firstFrame()), int(root.lastFrame())
+
+
+def deadline_plugin_info(scene):
+    """Keys only Nuke knows.
+
+    A selected Write node narrows the job to that one, which is what an artist
+    means by selecting it. Nothing selected renders every Write, which is what
+    Nuke itself does.
+    """
+    nuke = _nuke()
+    info = {
+        "Version": ".".join(nuke.NUKE_VERSION_STRING.split(".")[:2]),
+        "BatchMode": True,
+        "NukeX": bool(nuke.env.get("nukex")),
+    }
+    selected = [node.name() for node in nuke.selectedNodes("Write")]
+    if selected:
+        info["WriteNode"] = selected[0]
+    return info
+
+
 # -- menu actions ---------------------------------------------------------
 
-def action_save():
-    return common.save(sys.modules[__name__])
-
-
-def action_save_as():
-    return common.save_as(sys.modules[__name__])
-
-
-def action_version_up():
-    return common.version_up(sys.modules[__name__])
-
-
-def action_publish():
-    return common.publish_scene(sys.modules[__name__])
-
-
-def action_open_work_folder():
-    return common.open_work_folder(sys.modules[__name__])
-
-
-def action_open_publish_folder():
-    return common.open_publish_folder(sys.modules[__name__])
-
-
-def action_context():
-    return common.show_context(sys.modules[__name__])
+common.bind(sys.modules[__name__])

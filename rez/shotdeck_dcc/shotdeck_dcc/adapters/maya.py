@@ -72,9 +72,9 @@ def message(text):
 def confirm(text):
     """Yes/no before something that writes. Defaults to Cancel."""
     return _cmds().confirmDialog(
-        title="ShotDeck", message=text, button=["Publish", "Cancel"],
+        title="ShotDeck", message=text, button=["Continue", "Cancel"],
         defaultButton="Cancel", cancelButton="Cancel",
-        dismissString="Cancel") == "Publish"
+        dismissString="Cancel") == "Continue"
 
 
 def ask_path(start_dir, extension, suggested=""):
@@ -95,31 +95,33 @@ def ask_path(start_dir, extension, suggested=""):
     return chosen[0] if chosen else None
 
 
+# -- Deadline -------------------------------------------------------------
+
+def frame_range():
+    """Maya's playback range, which is what its render globals render."""
+    cmds = _cmds()
+    return (int(cmds.playbackOptions(query=True, minTime=True)),
+            int(cmds.playbackOptions(query=True, maxTime=True)))
+
+
+def deadline_plugin_info(scene):
+    """Keys only Maya knows. The frames and the scene are handled above it.
+
+    ProjectPath matters more than it looks: a batch render resolves every
+    relative texture and cache path against the workspace, so a job submitted
+    without it renders grey.
+    """
+    cmds = _cmds()
+    return {
+        "Version": cmds.about(query=True, version=True).split()[0],
+        "ProjectPath": cmds.workspace(query=True, rootDirectory=True),
+        "Renderer": cmds.getAttr("defaultRenderGlobals.currentRenderer"),
+        # A scene that errors should fail the task, not render 120 black
+        # frames that someone reviews tomorrow.
+        "StrictErrorChecking": True,
+    }
+
+
 # -- menu actions ---------------------------------------------------------
 
-def action_save():
-    return common.save(sys.modules[__name__])
-
-
-def action_save_as():
-    return common.save_as(sys.modules[__name__])
-
-
-def action_version_up():
-    return common.version_up(sys.modules[__name__])
-
-
-def action_publish():
-    return common.publish_scene(sys.modules[__name__])
-
-
-def action_open_work_folder():
-    return common.open_work_folder(sys.modules[__name__])
-
-
-def action_open_publish_folder():
-    return common.open_publish_folder(sys.modules[__name__])
-
-
-def action_context():
-    return common.show_context(sys.modules[__name__])
+common.bind(sys.modules[__name__])

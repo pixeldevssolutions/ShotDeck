@@ -118,29 +118,4 @@ def common_log(text):
 
 # -- menu actions ---------------------------------------------------------
 
-def action_save():
-    return common.save(sys.modules[__name__])
-
-
-def action_save_as():
-    return common.save_as(sys.modules[__name__])
-
-
-def action_version_up():
-    return common.version_up(sys.modules[__name__])
-
-
-def action_publish():
-    return common.publish_scene(sys.modules[__name__])
-
-
-def action_open_work_folder():
-    return common.open_work_folder(sys.modules[__name__])
-
-
-def action_open_publish_folder():
-    return common.open_publish_folder(sys.modules[__name__])
-
-
-def action_context():
-    return common.show_context(sys.modules[__name__])
+common.bind(sys.modules[__name__])

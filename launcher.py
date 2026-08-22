@@ -67,12 +67,14 @@ def launch(project, software, login=None, email=None, task=None):
     log.info("command: %s", _quote(cmd))
     log.info("output:  %s", log_path)
 
+    spawn = _outlive_shotdeck(cmd, name)
+
     with open(log_path, "wb") as out:
         out.write(_log_header(cmd, env, ctx, log_path).encode())
         out.flush()
         try:
             proc = subprocess.Popen(
-                cmd,
+                spawn,
                 env=env,
                 start_new_session=True,   # survive ShotDeck exiting
                 stdout=out,
@@ -165,6 +167,31 @@ def _rez_packages(software):
     return pkgs
 
 
+# Startup folder under startup/, and the variable the host reads it from.
+# Only used when the released rez package is not in the resolve -- package.py
+# wires exactly the same set, and the two have to agree.
+STARTUP_VARS = {
+    "maya": "PYTHONPATH",
+    "nuke": "NUKE_PATH",
+    "houdini": "HOUDINI_PATH",
+    "blender": "BLENDER_USER_SCRIPTS",
+    "substance": "SUBSTANCE_PAINTER_PLUGINS_PATH",
+    "3de": "3DE4_PYTHON_CUSTOM_SCRIPTS_DIR",
+}
+
+
+def _startup_folder(code):
+    """Which startup/ folder a software code wants, or None.
+
+    Silhouette and Rhino have folders but no confirmed way to be pointed at
+    them, so they are absent here rather than wired to a guess.
+    """
+    for name in STARTUP_VARS:
+        if code.startswith(name):
+            return name
+    return None
+
+
 def _tools_paths(software, rez_pkgs=()):
     """PYTHONPATH/NUKE_PATH entries for whatever rez is not already providing.
 
@@ -198,14 +225,22 @@ def _tools_paths(software, rez_pkgs=()):
     if not (config.REZ_CONTEXT_PACKAGE and
             config.REZ_CONTEXT_PACKAGE in resolved):
         roots.append(config.CONTEXT_SOURCE_ROOT)
-    if code.startswith("maya"):
-        # Maya runs any userSetup.py it finds on PYTHONPATH once the GUI is up.
-        roots.append(os.path.join(dcc_root, "startup", "maya"))
-    if code.startswith("nuke"):
-        # Nuke reads init.py/menu.py off NUKE_PATH instead.
-        nuke_startup = os.path.join(dcc_root, "startup", "nuke")
-        if os.path.isdir(nuke_startup):
-            out["NUKE_PATH+"] = nuke_startup
+    folder = _startup_folder(code)
+    startup = os.path.join(dcc_root, "startup", folder) if folder else ""
+    if startup and os.path.isdir(startup):
+        if code.startswith("maya"):
+            # Maya runs any userSetup.py it finds on PYTHONPATH once the GUI
+            # is up, so its hook rides along with the tools themselves.
+            roots.append(startup)
+        elif code.startswith("blender"):
+            # Blender takes a single scripts folder, not a list.
+            out["BLENDER_USER_SCRIPTS"] = startup
+        elif code.startswith("houdini"):
+            # "&" is Houdini's own default path list. A HOUDINI_PATH without
+            # it is a Houdini with none of its own tools.
+            out["HOUDINI_PATH+"] = startup + os.pathsep + "&"
+        else:
+            out[STARTUP_VARS[folder] + "+"] = startup
 
     roots = [p for p in roots if os.path.isdir(p)]
     if not roots:
@@ -217,6 +252,58 @@ def _tools_paths(software, rez_pkgs=()):
              config.REZ_DCC_PACKAGE)
     out["PYTHONPATH+"] = os.pathsep.join(roots)
     return out
+
+
+def _outlive_shotdeck(cmd, name):
+    """Wrap the command so quitting ShotDeck cannot take the DCC down with it.
+
+    start_new_session already detaches the process group, which is enough for a
+    signal but not for a cgroup: a desktop launch runs ShotDeck inside a
+    transient systemd app scope, every child inherits that scope, and the scope
+    takes its remaining processes with it. An artist closing the launcher would
+    lose an unsaved Maya scene.
+
+    systemd-run --scope puts the DCC in a scope of its own, so it is no longer
+    ShotDeck's to kill. Without a user bus -- a plain ssh session, a machine
+    that does not run systemd --user -- there is no scope to escape either, and
+    the command is returned untouched.
+    """
+    if not _scopes_work():
+        return list(cmd)
+
+    # No --unit: systemd names the scope, so two Mayas from one ShotDeck cannot
+    # collide. --collect removes it once the DCC exits.
+    log.info("%s runs in its own systemd scope — it outlives ShotDeck", name)
+    return ["systemd-run", "--user", "--scope", "--quiet",
+            "--collect"] + list(cmd)
+
+
+_SCOPES_WORK = None
+
+
+def _scopes_work():
+    """Can this session actually create a user scope? Probed once, then cached.
+
+    Probed rather than assumed: if systemd-run is present but the user manager
+    is not running, the wrapper would exit immediately and the DCC would never
+    start -- a worse failure than the one being fixed.
+    """
+    global _SCOPES_WORK
+    if _SCOPES_WORK is None:
+        _SCOPES_WORK = False
+        if shutil.which("systemd-run"):
+            try:
+                _SCOPES_WORK = subprocess.call(
+                    ["systemd-run", "--user", "--scope", "--quiet",
+                     "--collect", "true"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL, timeout=10) == 0
+            except (OSError, subprocess.SubprocessError):
+                _SCOPES_WORK = False
+        if not _SCOPES_WORK:
+            log.warning("no systemd user scopes here — a DCC started from "
+                        "ShotDeck may not outlive it; quit the DCC first")
+    return _SCOPES_WORK
 
 
 def _keep_tools_paths_through_rez(cmd, env, tools):

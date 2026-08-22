@@ -37,7 +37,14 @@ FILE_TYPES = {
     ".sfx": "Silhouette Project",
     ".hip": "Houdini Scene",
     ".hipnc": "Houdini Scene",
+    ".hiplc": "Houdini Scene",
     ".blend": "Blender Scene",
+    ".3de": "3DEqualizer Scene",
+    ".spp": "Substance Painter Project",
+    ".3dm": "Rhino Model",
+    ".psd": "Photoshop Document",
+    ".aep": "After Effects Project",
+    ".zpr": "ZBrush Project",
 }
 
 

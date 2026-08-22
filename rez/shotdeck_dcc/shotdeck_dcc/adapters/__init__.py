@@ -6,6 +6,10 @@ Every adapter offers the same three things to the shared code above it:
     save_scene(path)     save the open scene to path
     message(text)        put text where this host shows messages
 
+Two more are optional, and only matter to Deadline: frame_range() and
+deadline_plugin_info(scene). A host that renders on the farm implements them;
+one that does not is refused by deadline.PLUGINS long before they are called.
+
 The menu itself is described once, in ACTIONS, so the hosts differ only in how
 they build menus rather than in what is on them.
 """
@@ -13,14 +17,16 @@ they build menus rather than in what is on them.
 # (label, callable name on the adapter module). None is a separator.
 #
 # Grouped by what the artist is doing: working on the scene, handing it off,
-# then finding things. Publish sits alone between the two so it is hard to hit
-# by accident.
+# then finding things. The two that leave the workstation -- Publish and
+# Submit -- sit in a band of their own between the two, so neither is hit by
+# accident on the way to Save.
 ACTIONS = [
     ("Save", "action_save"),
     ("Save As...", "action_save_as"),
     ("Version Up", "action_version_up"),
     (None, None),
     ("Publish...", "action_publish"),
+    ("Submit to Deadline...", "action_submit"),
     (None, None),
     ("Open Work Folder", "action_open_work_folder"),
     ("Open Publish Folder", "action_open_publish_folder"),
