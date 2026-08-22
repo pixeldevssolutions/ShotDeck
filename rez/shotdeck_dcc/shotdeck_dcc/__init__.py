@@ -18,11 +18,11 @@ drag Maya code in with it.
 import logging
 import os
 
-from . import context, paths, publish, versioning
+from . import context, deadline, paths, publish, versioning
 
 __version__ = "1.0.0"
 
-__all__ = ["context", "paths", "publish", "versioning",
+__all__ = ["context", "deadline", "paths", "publish", "versioning",
            "install", "adapter", "log"]
 
 # One named logger. DCCs route logging to their own script editor or terminal,
@@ -34,24 +34,22 @@ if not log.handlers:
     log.addHandler(handler)
     log.setLevel(logging.INFO)
 
-# SHOTDECK_SOFTWARE carries the ShotGrid Software code, which is not always the
-# adapter's name. Anything not listed uses its own lowercased name.
-ALIASES = {
-    "sfx": "silhouette",
-    "silhouettefx": "silhouette",
-    "maya2026": "maya",
-    "nukex": "nuke",
-    "nukestudio": "nuke",
-}
-
-ADAPTERS = ("maya", "nuke", "silhouette")
+# Which adapter each normalised name maps to. The normalising itself lives in
+# paths.ALIASES, because the folder layout has to agree with the adapter about
+# what "3de" means.
+#
+# After Effects, Photoshop and ZBrush are deliberately absent: none of them
+# host an in-process Python interpreter, so there is nothing for an adapter to
+# run inside. Their folders are still in paths.LAYOUT, and publishing them is
+# ShotDeck's own publish dialog's job.
+ADAPTERS = ("maya", "nuke", "silhouette", "houdini", "blender", "tde4",
+            "substance", "rhino")
 
 
 def software(ctx=None):
     """Normalised adapter name for this session, e.g. "maya". "" when unknown."""
     ctx = ctx or context.get()
-    code = (ctx.software or "").strip().lower().replace(" ", "")
-    return ALIASES.get(code, code)
+    return paths.normalise(ctx.software)
 
 
 def adapter(name=None):

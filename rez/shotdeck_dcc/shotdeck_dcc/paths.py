@@ -14,15 +14,60 @@ import re
 
 from . import context
 
-# software code -> (subfolder under the entity root, scene extension).
+# SHOTDECK_SOFTWARE carries the rez package name, which is not always the
+# adapter's -- or the folder's -- name. Normalising here rather than in
+# __init__ keeps one spelling of "which DCC is this" for both the layouts
+# below and the adapter lookup, which is what stops the two drifting apart.
+ALIASES = {
+    "sfx": "silhouette",
+    "silhouettefx": "silhouette",
+    "maya2026": "maya",
+    "nukex": "nuke",
+    "nukestudio": "nuke",
+    "hou": "houdini",
+    "houdinifx": "houdini",
+    "3de": "tde4",
+    "3de4": "tde4",
+    "3dequalizer": "tde4",
+    "3dequalizer4": "tde4",
+    "painter": "substance",
+    "substancepainter": "substance",
+    "substance_painter": "substance",
+    "substance3dpainter": "substance",
+    "ae": "aftereffects",
+    "afterfx": "aftereffects",
+    "aftereffects": "aftereffects",
+    "ps": "photoshop",
+    "zb": "zbrush",
+}
+
+
+def normalise(software):
+    """Adapter/layout name for a ShotDeck software code. "" when unknown."""
+    code = (software or "").strip().lower().replace(" ", "")
+    return ALIASES.get(code, code)
+
+
+# software name -> (subfolder under the entity root, scene extension).
 # {step} is the pipeline step lowercased; it collapses out when the launch had
 # no step, so a task without one still saves somewhere sensible.
+#
+# Hosts with no in-process Python (After Effects, Photoshop, ZBrush) are listed
+# too: they have no adapter and never will, but ShotDeck itself resolves work
+# and publish folders through this table, so leaving them out would mean the
+# app browsing the wrong folder for a real task.
 LAYOUT = {
     "maya": ("maya/scenes/{step}", ".ma"),
     "nuke": ("nuke/{step}/scene", ".nk"),
     "silhouette": ("silhouette/{step}/scene", ".sfx"),
     "houdini": ("houdini/hip/{step}", ".hip"),
     "blender": ("blender/scenes/{step}", ".blend"),
+    "tde4": ("3DE/{step}/scene", ".3de"),
+    "substance": ("substance/{step}/scene", ".spp"),
+    "rhino": ("rhino/{step}/scene", ".3dm"),
+    "aftereffects": ("ae/{step}/scene", ".aep"),
+    "photoshop": ("photoshop/{step}/scene", ".psd"),
+    "zbrush": ("zbrush/{step}/scene", ".zpr"),
 }
 DEFAULT_LAYOUT = ("{software}/{step}/scene", "")
 
@@ -35,6 +80,12 @@ PUBLISH_LAYOUT = {
     "silhouette": "silhouette/{step}/publish",
     "houdini": "houdini/publish/{step}",
     "blender": "blender/publish/{step}",
+    "tde4": "3DE/{step}/publish",
+    "substance": "substance/{step}/publish",
+    "rhino": "rhino/{step}/publish",
+    "aftereffects": "ae/{step}/publish",
+    "photoshop": "photoshop/{step}/publish",
+    "zbrush": "zbrush/{step}/publish",
 }
 DEFAULT_PUBLISH_LAYOUT = "{software}/{step}/publish"
 
@@ -45,7 +96,7 @@ VERSION_PADDING = 4
 
 
 def _layout(software):
-    return LAYOUT.get((software or "").lower(), DEFAULT_LAYOUT)
+    return LAYOUT.get(normalise(software), DEFAULT_LAYOUT)
 
 
 def work_dir(ctx=None):
@@ -62,7 +113,7 @@ def work_dir(ctx=None):
 
     template, _ = _layout(ctx.software)
     relative = template.format(step=(ctx.step or "").lower(),
-                               software=(ctx.software or "dcc").lower())
+                               software=normalise(ctx.software) or "dcc")
     # Collapse the empty {step} rather than leaving a // in the path.
     parts = [p for p in relative.split("/") if p]
     return "/".join([root] + parts)
@@ -75,10 +126,10 @@ def publish_dir(ctx=None):
     if not root:
         return None
 
-    template = PUBLISH_LAYOUT.get((ctx.software or "").lower(),
+    template = PUBLISH_LAYOUT.get(normalise(ctx.software),
                                   DEFAULT_PUBLISH_LAYOUT)
     relative = template.format(step=(ctx.step or "").lower(),
-                               software=(ctx.software or "dcc").lower())
+                               software=normalise(ctx.software) or "dcc")
     parts = [p for p in relative.split("/") if p]
     return "/".join([root] + parts)
 

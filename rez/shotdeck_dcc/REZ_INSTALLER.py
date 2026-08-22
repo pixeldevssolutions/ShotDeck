@@ -11,6 +11,12 @@ Layout produced:
     <install>/python/shotdeck_dcc/...      on PYTHONPATH, so `import shotdeck_dcc`
     <install>/startup/maya/userSetup.py    on PYTHONPATH when maya is resolved
     <install>/startup/nuke/init.py         on NUKE_PATH when nuke is resolved
+    <install>/startup/houdini/scripts/     on HOUDINI_PATH when houdini is
+    <install>/startup/blender/startup/     BLENDER_USER_SCRIPTS for blender
+    <install>/startup/substance/           Painter's plugins path
+    <install>/startup/3de/                 3DE's custom scripts dir; the menu
+                                           *is* these files
+    <install>/startup/rhino/README.txt     no menu API -- run by name
     <install>/startup/silhouette/          not wired yet -- see package.py
     <install>/probe_silhouette.py          run inside Silhouette to find its hook
     <install>/verify_maya.py               run inside Maya to check the menu loaded

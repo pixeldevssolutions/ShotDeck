@@ -5,11 +5,12 @@ things that are genuinely host-specific: save_scene(), current_scene(),
 message(), confirm(), and ask_path().
 """
 
+import functools
 import os
 import subprocess
 import sys
 
-from .. import context, paths, publish, versioning
+from .. import context, deadline, paths, publish, versioning
 
 
 def save(adapter):
@@ -118,6 +119,54 @@ def publish_scene(adapter):
     return result
 
 
+def submit_to_deadline(adapter):
+    """Save the scene, confirm the job, hand it to the farm.
+
+    The save is not optional and not a version up: the farm renders the file
+    that is on disk, so submitting without saving queues yesterday's scene --
+    the one bug in a submitter that costs a whole farm night. An unsaved scene
+    has no file to save over, so that case routes to Version Up as Save does.
+    """
+    current = adapter.current_scene()
+    if not current:
+        if not version_up(adapter):
+            return None
+    else:
+        try:
+            adapter.save_scene(current)
+        except Exception as e:
+            adapter.message("Could not save before submitting: {0}".format(e))
+            return None
+
+    try:
+        plugin_name, scene = deadline.validate(adapter)
+        frames = deadline.frames(adapter)
+    except deadline.DeadlineError as e:
+        adapter.message(str(e))
+        return None
+
+    ctx = context.get()
+    if not adapter.confirm(
+            "Submit {0} to Deadline?\n\n"
+            "Plugin      {1}\nFrames      {2}\nPool        {3}\n"
+            "Scene       {4}"
+            .format(ctx.task_name or "this scene", plugin_name, frames,
+                    deadline.POOL, scene)):
+        return None
+
+    try:
+        job = deadline.submit(adapter)
+    except deadline.DeadlineError as e:
+        adapter.message(str(e))
+        return None
+    except Exception as e:
+        adapter.message("Submit to Deadline failed: {0}".format(e))
+        return None
+
+    adapter.message(job.summary())
+    return job
+
+
 def open_work_folder(adapter):
     return _open(adapter, paths.work_dir(), "work")
 
@@ -171,3 +220,32 @@ def _under(path, folder):
     if not folder:
         return False
     return os.path.normpath(path).startswith(os.path.normpath(folder) + os.sep)
+
+
+# -- wiring ---------------------------------------------------------------
+
+# Menu attribute -> the function above it. ACTIONS names these; adapters get
+# them from bind() rather than writing seven one-line wrappers each.
+ACTION_FUNCS = {
+    "action_save": save,
+    "action_save_as": save_as,
+    "action_version_up": version_up,
+    "action_publish": publish_scene,
+    "action_submit": submit_to_deadline,
+    "action_open_work_folder": open_work_folder,
+    "action_open_publish_folder": open_publish_folder,
+    "action_context": show_context,
+}
+
+
+def bind(module):
+    """Give an adapter module its action_* entry points.
+
+    An action the adapter already defines is left alone: a host whose file
+    dialog cannot answer synchronously (Blender) has to own its own Save As,
+    and overwriting it here would silently undo that.
+    """
+    for name, func in ACTION_FUNCS.items():
+        if not hasattr(module, name):
+            setattr(module, name, functools.partial(func, module))
+    return module
