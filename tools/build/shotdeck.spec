@@ -8,22 +8,33 @@ find them with os.path.dirname(__file__) and that resolves inside the bundle
 to the same relative place.
 """
 
+import os
+
 from PyInstaller.utils.hooks import collect_data_files
 
+# Relative paths in a spec resolve against the spec file, not the cwd, so every
+# path here is anchored to the app root two levels up.
+ROOT = os.path.dirname(os.path.dirname(SPECPATH))  # noqa: F821 -- PyInstaller injects SPECPATH
+
+
+def root(*parts):
+    return os.path.join(ROOT, *parts)
+
+
 datas = [
-    ("media", "media"),                     # ui/branding.py -> media/5and8_logo.png
-    ("envs", "envs"),                       # config.ENVS_DIR
-    ("auth/auth_config.yml", "auth"),       # auth/config.py CONFIG_PATH
+    (root("media"), "media"),                     # ui/branding.py -> media/5and8_logo.png
+    (root("envs"), "envs"),                       # config.ENVS_DIR
+    (root("auth", "auth_config.yml"), "auth"),       # auth/config.py CONFIG_PATH
     # config.DCC_SOURCE_ROOT / CONTEXT_SOURCE_ROOT: put on PYTHONPATH for the
     # DCCs ShotDeck launches, so they ship as plain files, not as imports.
-    ("rez/shotdeck_dcc", "rez/shotdeck_dcc"),
-    ("rez/shotdeck_context", "rez/shotdeck_context"),
+    (root("rez", "shotdeck_dcc"), "rez/shotdeck_dcc"),
+    (root("rez", "shotdeck_context"), "rez/shotdeck_context"),
 ]
 datas += collect_data_files("shotgun_api3")  # bundled cacerts
 
 a = Analysis(
-    ["main.py"],
-    pathex=["."],
+    [root("main.py")],
+    pathex=[ROOT],
     binaries=[],
     datas=datas,
     hiddenimports=[
@@ -36,7 +47,7 @@ a = Analysis(
     ],
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=["tools/build/rthook_shotdeck.py"],
+    runtime_hooks=[root("tools", "build", "rthook_shotdeck.py")],
     excludes=[
         "matplotlib", "numpy", "pandas", "scipy", "PIL", "cv2", "tkinter",
         "PySide6.QtWebEngineCore", "PySide6.QtWebEngineWidgets",
