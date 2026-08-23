@@ -5,6 +5,7 @@ Runs before main.py, so config.py sees the credentials at import time.
 """
 
 import os
+import sys
 
 # PySide6 renders the tiles wrong under Rocky 9's wayland session.
 os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
@@ -27,7 +28,9 @@ except OSError:
     pass    # No file on a dev box; SGClient reports the missing key itself.
 
 
-if __name__ == "__main__":
+# PyInstaller runs a runtime hook as "__main__" too, so the self-check has to
+# stay out of the frozen app -- there is no source file to re-read in there.
+if __name__ == "__main__" and not getattr(sys, "frozen", False):
     # python tools/build/rthook_shotdeck.py -- checks the env-file parser
     # against the shapes sgdesk.env actually takes.
     import tempfile
