@@ -735,6 +735,11 @@ class VersionBrowser(QDialog):
     def _compare(self, version_a, version_b):
         if not version_a or not version_b:
             return
+        # RV's wipe is the compare a supervisor signs off on; the dialog stays
+        # the fallback for versions whose media this machine cannot read.
+        if rv_player.playable(version_a) and rv_player.playable(version_b):
+            self._open_in_rv([version_a, version_b], mode="wipe")
+            return
         VersionCompare(self.sg, self.project, version_a, version_b,
                        versions=self._versions, parent=self).exec()
 
