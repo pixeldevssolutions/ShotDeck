@@ -174,7 +174,7 @@ class Splash(QWidget):
         self._ready = False
         self._closing = False
 
-        # Instance copies: the tests and SHOTDECK_SPLASH_MS both retime a
+        # Instance copies: the tests and FLOW_SPLASH_MS both retime a
         # single splash without touching the class.
         self.GROUND_MS = int(self.MIN_MS * self.GROUND_AT)
         self.MARK_MS = int(self.MIN_MS * self.MARK_AT)
@@ -215,7 +215,7 @@ class Splash(QWidget):
 
     def show(self):
         if self.MIN_MS <= 0:
-            return                   # SHOTDECK_SPLASH_MS=0: never appears
+            return                   # FLOW_SPLASH_MS=0: never appears
         self.setWindowOpacity(0.0)
         super().show()
         self._clock.start()

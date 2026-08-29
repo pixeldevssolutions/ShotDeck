@@ -1,4 +1,4 @@
-"""Run ShotDeck's tests.
+"""Run Flow's tests.
 
     python tests/run.py            # everything
     python tests/run.py publish    # only modules whose name contains "publish"
@@ -21,7 +21,7 @@ sys.path.insert(0, HERE)
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("SG_SCRIPT_KEY", "test-key-not-real")
-os.environ.setdefault("SHOTDECK_LOG_DIR",
+os.environ.setdefault("FLOW_LOG_DIR",
                       os.path.join(HERE, "_logs"))
 
 # shotgun_api3 is not installed on a developer's Windows box, and none of these

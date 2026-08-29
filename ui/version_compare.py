@@ -24,6 +24,7 @@ import applog
 import config
 import media_inspector
 import notes_service
+import rv_player
 from . import jobs, theme
 from .widgets import EmptyState, load_thumbnail
 
@@ -366,8 +367,34 @@ class VersionCompare(QDialog):
         self.actual_btn.setObjectName("consoleBtn")
         self.actual_btn.clicked.connect(lambda: self.image_view.set_zoom(1.0))
         bar.addWidget(self.actual_btn)
+
+        # This dialog compares what it can decode -- thumbnails, often. RV
+        # compares the actual render, in the same mode, and can do difference on
+        # a movie where this one has to refuse.
+        bar.addSpacing(16)
+        self.rv_btn = QPushButton("Open in RV")
+        self.rv_btn.setObjectName("consoleBtn")
+        self.rv_btn.clicked.connect(self._open_in_rv)   # enabled in set_versions
+        bar.addWidget(self.rv_btn)
         bar.addStretch()
         return bar
+
+    def _open_in_rv(self):
+        """Send both versions to RV in whatever mode is selected here.
+
+        The mode constants are RV's compare flags in rv_player.MODES, so the
+        wipe stays a wipe and the difference stays a difference -- switching
+        player should not switch what is being looked at.
+        """
+        try:
+            pid, log_path = rv_player.open_versions(
+                [self.version_a, self.version_b],
+                mode=self.image_view.mode, project=self.project)
+        except Exception as e:
+            log.error("could not open RV: %s", e)
+            QMessageBox.warning(self, "Open in RV", str(e))
+            return
+        log.info("RV pid %s, log %s", pid, log_path)
 
     def _metadata_and_notes(self):
         host = QFrame()
@@ -422,6 +449,15 @@ class VersionCompare(QDialog):
                  self.media_a.path or self.media_a.thumbnail_url or "nothing",
                  self.media_b.code, self.media_b.source,
                  self.media_b.path or self.media_b.thumbnail_url or "nothing")
+
+        # Offered only when RV would have both sides: one real render against a
+        # missing mount is not a comparison.
+        both = rv_player.playable(version_a) and rv_player.playable(version_b)
+        self.rv_btn.setEnabled(both)
+        self.rv_btn.setToolTip(
+            "Compare the full-resolution media in OpenRV, in the mode selected "
+            "here" if both else
+            "At least one of these versions has no media this machine can read")
 
         self._build_headers()
         self._build_metadata()

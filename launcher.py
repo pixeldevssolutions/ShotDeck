@@ -21,12 +21,12 @@ def launch(project, software, login=None, email=None, task=None):
     """Start a DCC for this project, inside a rez environment when one is set.
 
     `task` is the ShotGrid Task the artist selected, or None. Either way a
-    context file is written and pointed at by SHOTDECK_CONTEXT_FILE, so
+    context file is written and pointed at by FLOW_CONTEXT_FILE, so
     in-DCC publish tools always have something to read.
 
     Returns (pid, log_path). The process writes its stdout and stderr to
     log_path -- a file rather than a pipe, so a DCC is never blocked by a full
-    pipe buffer after ShotDeck exits.
+    pipe buffer after Flow exits.
     """
     ctx = ctx_mod.build(project, software, task, login, email)
     ctx_path = ctx_mod.write(ctx)
@@ -67,7 +67,7 @@ def launch(project, software, login=None, email=None, task=None):
     log.info("command: %s", _quote(cmd))
     log.info("output:  %s", log_path)
 
-    spawn = _outlive_shotdeck(cmd, name)
+    spawn = outlive_flow(cmd, name)
 
     with open(log_path, "wb") as out:
         out.write(_log_header(cmd, env, ctx, log_path).encode())
@@ -76,7 +76,7 @@ def launch(project, software, login=None, email=None, task=None):
             proc = subprocess.Popen(
                 spawn,
                 env=env,
-                start_new_session=True,   # survive ShotDeck exiting
+                start_new_session=True,   # survive Flow exiting
                 stdout=out,
                 stderr=subprocess.STDOUT,
             )
@@ -93,7 +93,7 @@ def launch_package(project, package, version=None, task=None,
                    login=None, email=None, extra_packages=()):
     """Launch a DCC discovered in the rez package tree, against a task.
 
-    Runs `rez env <package>-<version> shotdeck_context -- <command>` in one
+    Runs `rez env <package>-<version> flow_context -- <command>` in one
     shot: the command is passed to rez, so nothing has to be typed once the
     environment resolves.
     """
@@ -138,17 +138,17 @@ def _build_command(software, rez_pkgs=None):
 # (package, what is lost when it has not been released yet)
 _INJECTED_PACKAGES = [
     (config.REZ_CONTEXT_PACKAGE,
-     "In-DCC tools must fall back to the SHOTDECK_* variables"),
+     "In-DCC tools must fall back to the FLOW_* variables"),
     (config.REZ_DCC_PACKAGE,
-     "The ShotDeck menu will not appear inside the DCC"),
+     "The Flow menu will not appear inside the DCC"),
 ]
 
 
 def _rez_packages(software):
-    """Requested packages, plus ShotDeck's own when they are released.
+    """Requested packages, plus Flow's own when they are released.
 
     Asking for a package that doesn't exist makes rez reject the whole resolve,
-    so an unbuilt shotdeck_dcc would block every launch. Both are therefore
+    so an unbuilt flow_dcc would block every launch. Both are therefore
     optional: the launch still works, it just arrives with less.
     """
     pkgs = (software.get(config.SOFTWARE_REZ_FIELD) or "").split()
@@ -197,10 +197,10 @@ def _tools_paths(software, rez_pkgs=()):
 
     Rez first: a package in `rez_pkgs` is resolved by rez, which puts its own
     installed copy on PYTHONPATH and wires the host's startup mechanism, so
-    ShotDeck adds nothing for it -- no second copy of the tools, no second
+    Flow adds nothing for it -- no second copy of the tools, no second
     userSetup.py, nothing that could shadow a released version.
 
-    The source tree fills the gap until then. `shotdeck_dcc` is only injected
+    The source tree fills the gap until then. `flow_dcc` is only injected
     into a request when the Software entity asks for rez packages at all and
     the package has been built (see _rez_packages), so a DCC launched straight
     from linux_path, or launched before the packages are released, gets nothing
@@ -244,8 +244,8 @@ def _tools_paths(software, rez_pkgs=()):
 
     roots = [p for p in roots if os.path.isdir(p)]
     if not roots:
-        log.warning("in-DCC tools not found at %s — the ShotDeck menu will "
-                    "not appear. Set SHOTDECK_DCC_SOURCE.", dcc_root)
+        log.warning("in-DCC tools not found at %s — the Flow menu will "
+                    "not appear. Set FLOW_DCC_SOURCE.", dcc_root)
         return out
 
     log.info("%s not in the rez resolve — falling back to the source tree",
@@ -254,26 +254,26 @@ def _tools_paths(software, rez_pkgs=()):
     return out
 
 
-def _outlive_shotdeck(cmd, name):
-    """Wrap the command so quitting ShotDeck cannot take the DCC down with it.
+def outlive_flow(cmd, name):
+    """Wrap the command so quitting Flow cannot take the DCC down with it.
 
     start_new_session already detaches the process group, which is enough for a
-    signal but not for a cgroup: a desktop launch runs ShotDeck inside a
+    signal but not for a cgroup: a desktop launch runs Flow inside a
     transient systemd app scope, every child inherits that scope, and the scope
     takes its remaining processes with it. An artist closing the launcher would
     lose an unsaved Maya scene.
 
     systemd-run --scope puts the DCC in a scope of its own, so it is no longer
-    ShotDeck's to kill. Without a user bus -- a plain ssh session, a machine
+    Flow's to kill. Without a user bus -- a plain ssh session, a machine
     that does not run systemd --user -- there is no scope to escape either, and
     the command is returned untouched.
     """
     if not _scopes_work():
         return list(cmd)
 
-    # No --unit: systemd names the scope, so two Mayas from one ShotDeck cannot
+    # No --unit: systemd names the scope, so two Mayas from one Flow cannot
     # collide. --collect removes it once the DCC exits.
-    log.info("%s runs in its own systemd scope — it outlives ShotDeck", name)
+    log.info("%s runs in its own systemd scope — it outlives Flow", name)
     return ["systemd-run", "--user", "--scope", "--quiet",
             "--collect"] + list(cmd)
 
@@ -302,7 +302,7 @@ def _scopes_work():
                 _SCOPES_WORK = False
         if not _SCOPES_WORK:
             log.warning("no systemd user scopes here — a DCC started from "
-                        "ShotDeck may not outlive it; quit the DCC first")
+                        "Flow may not outlive it; quit the DCC first")
     return _SCOPES_WORK
 
 
@@ -310,14 +310,14 @@ def _keep_tools_paths_through_rez(cmd, env, tools):
     """Stop `rez env` from dropping the fallback paths _tools_paths() set.
 
     rez resets any variable a resolved package writes to, so maya's own
-    PYTHONPATH.prepend wipes what ShotDeck put there before the DCC ever
+    PYTHONPATH.prepend wipes what Flow put there before the DCC ever
     starts -- which is why the source tree was missing from Maya's PYTHONPATH
     even when the launch environment held it. Variables named in
     parent_variables are inherited instead of reset; REZ_PARENT_VARIABLES is
     the environment override for that setting.
 
-    Only the variables ShotDeck actually filled are asked for, and only when
-    the fallback is in play: with shotdeck_dcc in the resolve `tools` is empty
+    Only the variables Flow actually filled are asked for, and only when
+    the fallback is in play: with flow_dcc in the resolve `tools` is empty
     and rez's environment is left exactly as it is today. Nothing here forces a
     rez launch either -- it edits the environment of a command that is already
     `rez env`.
@@ -351,7 +351,7 @@ def _preflight(cmd, software):
             raise LaunchError(
                 "rez is not on PATH for this session, so packaged apps cannot "
                 "be launched.\n\nCheck that the artist's login shell sources "
-                "the studio rez setup, or set SHOTDECK_REZ_EXECUTABLE to an "
+                "the studio rez setup, or set FLOW_REZ_EXECUTABLE to an "
                 "absolute path.")
         raise LaunchError(f"Command not found on PATH: {exe}")
 
@@ -359,11 +359,11 @@ def _preflight(cmd, software):
 def _log_header(cmd, env, ctx, log_path):
     """Written at the top of every launch log, so it explains itself."""
     task = ctx.get("task") or {}
-    shotdeck_env = "\n".join(
+    flow_env = "\n".join(
         f"  {k}={v}" for k, v in sorted(env.items())
-        if k.startswith(("SHOTDECK_", "SGDESK_", "REZ_")))
+        if k.startswith(("FLOW_", "SGDESK_", "REZ_")))
     return (
-        "# ShotDeck launch log\n"
+        "# Flow launch log\n"
         f"# {log_path}\n"
         f"# project : {ctx['project']['name']} (id {ctx['project']['id']})\n"
         f"# task    : {task.get('name') or '(none)'}"
@@ -371,7 +371,7 @@ def _log_header(cmd, env, ctx, log_path):
         f"# user    : {ctx['user']['login']} <{ctx['user']['email']}>\n"
         f"# command : {_quote(cmd)}\n"
         "#\n# environment passed in:\n"
-        f"{shotdeck_env}\n"
+        f"{flow_env}\n"
         "# ---------------- process output below ----------------\n\n"
     )
 

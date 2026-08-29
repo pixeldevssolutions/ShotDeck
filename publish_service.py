@@ -8,7 +8,7 @@ Two identities are involved and they are not the same thing:
   * the API request authenticates as the script user, `SG_SCRIPT_NAME`
     (`SG_daemon` here), which is what lets artists publish without a ShotGrid
     seat of their own;
-  * the Version's `user` field credits the artist ShotDeck resolved at startup
+  * the Version's `user` field credits the artist Flow resolved at startup
     from their email address.
 
 `SGClient.create_version` is where that is enforced. Nothing in this module
@@ -107,7 +107,7 @@ def friendly(error, stage=""):
     if any(w in low for w in ("authenticat", "invalid script", "api key",
                               "api_key", "script name")):
         return AuthFailed(
-            "ShotGrid rejected ShotDeck's credentials. The service account "
+            "ShotGrid rejected Flow's credentials. The service account "
             "may have been disabled or its key rotated.\n\n"
             "Contact Pipeline.", text)
 
@@ -213,7 +213,7 @@ class PublishService:
         if not config.media_kind(path):
             ext = os.path.splitext(path)[1] or "(no extension)"
             raise MediaError(
-                f"{ext} is not a media format ShotDeck publishes.\n\n"
+                f"{ext} is not a media format Flow publishes.\n\n"
                 f"Movies: {', '.join(sorted(config.MOVIE_EXTENSIONS))}\n"
                 f"Images: {', '.join(sorted(config.IMAGE_EXTENSIONS))}")
         if not os.access(path, os.R_OK):
@@ -255,7 +255,7 @@ class PublishService:
         if clash:
             raise DuplicateVersionError(
                 f"A Version named {name} already exists on this task.\n\n"
-                f"Choose another version name — ShotDeck will not overwrite "
+                f"Choose another version name — Flow will not overwrite "
                 f"an existing Version.", f"Version {clash['id']}")
         return None
 

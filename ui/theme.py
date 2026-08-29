@@ -1,6 +1,6 @@
 """Colours, spacing and the stylesheet, kept in one place.
 
-Anything that decides how ShotDeck looks belongs here rather than scattered
+Anything that decides how Flow looks belongs here rather than scattered
 through the widgets, so a restyle is one file.
 """
 

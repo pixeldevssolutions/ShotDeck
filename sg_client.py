@@ -57,7 +57,7 @@ class SGClient:
             return
         if not config.SG_SCRIPT_KEY:
             raise RuntimeError(
-                "SG_SCRIPT_KEY is not set. Export it before starting ShotDeck "
+                "SG_SCRIPT_KEY is not set. Export it before starting Flow "
                 )
 
     @property
@@ -115,7 +115,7 @@ class SGClient:
         """Which ShotGrid script the API calls authenticate as.
 
         Shown in the publish result so a supervisor can tell at a glance that a
-        Version came through ShotDeck's daemon rather than a seat. Only the
+        Version came through Flow's daemon rather than a seat. Only the
         script *name* -- the key never leaves config.
         """
         return config.SG_SCRIPT_NAME
@@ -193,7 +193,7 @@ class SGClient:
     def task_statuses(self):
         """[(code, label), ...] straight from the site's status list.
 
-        Read once and kept -- the schema does not change while ShotDeck is
+        Read once and kept -- the schema does not change while Flow is
         open, and this is called every time a context menu opens.
         """
         if self._statuses is not None:
@@ -453,7 +453,7 @@ class SGClient:
     # -- notes -------------------------------------------------------------
     #
     # ShotGrid's own model: a Note links to entities through note_links, and
-    # replies are Reply entities pointing back at the Note. ShotDeck stores
+    # replies are Reply entities pointing back at the Note. Flow stores
     # nothing of its own -- production notes belong to ShotGrid.
 
     def notes_for_version(self, version_id):
@@ -585,7 +585,7 @@ class SGClient:
         `work_file` is an optional DCC scene registered after the media. It is
         deliberately last: by the time it runs the Version exists and the media
         is uploaded, so a failure there is reported on the returned dict
-        (`shotdeck_work_file_error`) rather than raised.
+        (`flow_work_file_error`) rather than raised.
         """
         def say(msg):
             log.info(msg)
@@ -617,11 +617,11 @@ class SGClient:
         if work_file:
             say(f"Registering {os.path.basename(work_file)}…")
             try:
-                version["shotdeck_work_file"] = self.attach_work_file(
+                version["flow_work_file"] = self.attach_work_file(
                     project, task, version, work_file)
             except Exception as e:
                 log.warning("work file not registered: %s", e)
-                version["shotdeck_work_file_error"] = str(e)
+                version["flow_work_file_error"] = str(e)
 
         say("Done")
         return version

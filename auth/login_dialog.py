@@ -17,7 +17,7 @@ class LoginDialog(QDialog):
     def __init__(self, cfg, message="", parent=None):
         super().__init__(parent)
         self.cfg = cfg
-        self.setWindowTitle("ShotDeck - Sign in")
+        self.setWindowTitle("Flow - Sign in")
         self.setMinimumWidth(380)
         self.setStyleSheet(theme.STYLE)
         self.setWindowFlag(Qt.WindowContextHelpButtonHint, False)
