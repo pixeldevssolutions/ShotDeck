@@ -1,11 +1,11 @@
 """ShotGrid context handed to a launched DCC.
 
-A launch writes a small JSON file and points SHOTDECK_CONTEXT_FILE at it. The
-individual SHOTDECK_* variables carry the same information for shell scripts and
+A launch writes a small JSON file and points FLOW_CONTEXT_FILE at it. The
+individual FLOW_* variables carry the same information for shell scripts and
 for rez package commands() blocks that cannot parse JSON.
 
 DCC-side code should not read these variables directly -- import the
-`shotdeck_context` rez package instead (see rez/shotdeck_context/), so the
+`flow_context` rez package instead (see rez/flow_context/), so the
 shape of the file can change without breaking every publish tool.
 """
 
@@ -20,7 +20,7 @@ import config
 import paths
 
 CONTEXT_DIR = os.environ.get(
-    "SHOTDECK_CONTEXT_DIR", os.path.expanduser("~/.shotdeck/context"))
+    "FLOW_CONTEXT_DIR", os.path.expanduser("~/.flow/context"))
 
 # Contexts older than this are removed on the next launch.
 CONTEXT_MAX_AGE_SECONDS = 7 * 24 * 3600
@@ -85,31 +85,31 @@ def env(ctx, path):
     """Flatten the context into environment variables for the launched process."""
     task = ctx.get("task") or {}
     out = {
-        "SHOTDECK_CONTEXT_FILE": path,
-        "SHOTDECK_SITE": ctx["site"],
-        "SHOTDECK_USER": ctx["user"]["login"],
-        "SHOTDECK_USER_EMAIL": ctx["user"]["email"],
-        "SHOTDECK_PROJECT_ID": str(ctx["project"]["id"]),
-        "SHOTDECK_PROJECT_NAME": ctx["project"]["name"],
-        "SHOTDECK_PROJECT_CODE": ctx["project"]["code"],
-        "SHOTDECK_SOFTWARE": ctx["software"]["code"],
-        "SHOTDECK_SOFTWARE_VERSION": ctx["software"]["version"] or "",
+        "FLOW_CONTEXT_FILE": path,
+        "FLOW_SITE": ctx["site"],
+        "FLOW_USER": ctx["user"]["login"],
+        "FLOW_USER_EMAIL": ctx["user"]["email"],
+        "FLOW_PROJECT_ID": str(ctx["project"]["id"]),
+        "FLOW_PROJECT_NAME": ctx["project"]["name"],
+        "FLOW_PROJECT_CODE": ctx["project"]["code"],
+        "FLOW_SOFTWARE": ctx["software"]["code"],
+        "FLOW_SOFTWARE_VERSION": ctx["software"]["version"] or "",
         # Present but empty when the app was launched with no task selected,
         # so publish tools can tell "no context" from "variable missing".
-        "SHOTDECK_TASK_ID": str(task.get("id") or ""),
-        "SHOTDECK_TASK_NAME": task.get("name") or "",
-        "SHOTDECK_STEP": task.get("step") or "",
-        "SHOTDECK_ENTITY_TYPE": task.get("entity_type") or "",
-        "SHOTDECK_ENTITY_ID": str(task.get("entity_id") or ""),
-        "SHOTDECK_ENTITY_NAME": task.get("entity_name") or "",
-        # Where this task's scenes live. shotdeck_dcc builds work paths from
+        "FLOW_TASK_ID": str(task.get("id") or ""),
+        "FLOW_TASK_NAME": task.get("name") or "",
+        "FLOW_STEP": task.get("step") or "",
+        "FLOW_ENTITY_TYPE": task.get("entity_type") or "",
+        "FLOW_ENTITY_ID": str(task.get("entity_id") or ""),
+        "FLOW_ENTITY_NAME": task.get("entity_name") or "",
+        # Where this task's scenes live. flow_dcc builds work paths from
         # this rather than re-deriving the templates on the DCC side.
-        "SHOTDECK_ENTITY_ROOT": ctx.get("entity_root") or "",
-        "SHOTDECK_SEQUENCE": ctx.get("sequence") or "",
+        "FLOW_ENTITY_ROOT": ctx.get("entity_root") or "",
+        "FLOW_SEQUENCE": ctx.get("sequence") or "",
         # Where shotgun_api3 lives, so a DCC can import it for publish
         # registration. A DCC ships its own Python with its own site-packages
-        # and cannot see ShotDeck's venv otherwise.
-        "SHOTDECK_SG_API_PATH": _sg_api_path(),
+        # and cannot see Flow's venv otherwise.
+        "FLOW_SG_API_PATH": _sg_api_path(),
     }
     return out
 
@@ -118,7 +118,7 @@ def _sg_api_path():
     """The directory containing the shotgun_api3 package, or "".
 
     Read off the imported module rather than configured, so it follows the
-    venv ShotDeck is actually running from. In-DCC code appends this to
+    venv Flow is actually running from. In-DCC code appends this to
     sys.path -- never prepends -- so it cannot shadow a DCC's own modules.
     """
     try:
@@ -132,7 +132,7 @@ def _sg_api_path():
 
 
 def _prune():
-    """Delete stale context files so ~/.shotdeck does not grow without bound."""
+    """Delete stale context files so ~/.flow does not grow without bound."""
     cutoff = time.time() - CONTEXT_MAX_AGE_SECONDS
     try:
         names = os.listdir(CONTEXT_DIR)

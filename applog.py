@@ -1,15 +1,15 @@
-"""Logging for ShotDeck: one session log, one file per launched process.
+"""Logging for Flow: one session log, one file per launched process.
 
-Everything ShotDeck does that an artist might have to explain to a supervisor --
+Everything Flow does that an artist might have to explain to a supervisor --
 which command ran, with which packages, against which task -- goes through here.
 Two sinks:
 
-  * ~/.shotdeck/logs/session-<pid>.log   what ShotDeck itself did
-  * ~/.shotdeck/logs/<stamp>-<name>.log  stdout+stderr of one launched DCC
+  * ~/.flow/logs/session-<pid>.log   what Flow itself did
+  * ~/.flow/logs/<stamp>-<name>.log  stdout+stderr of one launched DCC
 
 The UI subscribes with `subscribe()` to mirror the session log into the Terminal
 panel. This module deliberately does not import Qt, so it stays usable when
-ShotDeck code is run headless (probes, cron jobs, tests).
+Flow code is run headless (probes, cron jobs, tests).
 """
 
 import datetime
@@ -20,12 +20,12 @@ import re
 import sys
 
 LOG_DIR = os.environ.get(
-    "SHOTDECK_LOG_DIR", os.path.expanduser("~/.shotdeck/logs"))
+    "FLOW_LOG_DIR", os.path.expanduser("~/.flow/logs"))
 
 # Launch logs older than this are removed when a new session starts.
 LOG_MAX_AGE_SECONDS = 14 * 24 * 3600
 
-_log = logging.getLogger("shotdeck")
+_log = logging.getLogger("flow")
 _subscribers = []
 _configured = False
 _crash_file = None      # kept open for faulthandler, see _enable_crash_dump()
@@ -122,7 +122,7 @@ def launch_log_path(name):
 
 
 def _prune():
-    """Drop old launch logs so ~/.shotdeck/logs does not grow without bound."""
+    """Drop old launch logs so ~/.flow/logs does not grow without bound."""
     import time
     cutoff = time.time() - LOG_MAX_AGE_SECONDS
     try:

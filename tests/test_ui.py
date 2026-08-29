@@ -19,7 +19,7 @@ import fakes
 import publish_service
 
 app = None
-TMP = tempfile.mkdtemp(prefix="shotdeck-ui-")
+TMP = tempfile.mkdtemp(prefix="flow-ui-")
 PNG = os.path.join(TMP, "SH010_comp_v004.png")
 NK = os.path.join(TMP, "SH010_comp_v004.nk")
 

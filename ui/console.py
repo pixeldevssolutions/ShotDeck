@@ -1,4 +1,4 @@
-"""The Terminal panel: what ShotDeck did, and what the launched app is saying.
+"""The Terminal panel: what Flow did, and what the launched app is saying.
 
 Two sources feed it:
 
@@ -144,7 +144,7 @@ class ConsolePanel(QWidget):
 
     def _save(self):
         path, _ = QFileDialog.getSaveFileName(
-            self, "Save log", os.path.expanduser("~/shotdeck-log.txt"))
+            self, "Save log", os.path.expanduser("~/flow-log.txt"))
         if path:
             with open(path, "w") as f:
                 f.write(self.view.toPlainText())

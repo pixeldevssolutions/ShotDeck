@@ -109,7 +109,7 @@ class MainWindow(QMainWindow):
         self.term_btn.setCheckable(True)
         self.term_btn.setCursor(Qt.PointingHandCursor)
         self.term_btn.setToolTip(
-            "Show what ShotDeck is running in the background (Ctrl+`)")
+            "Show what Flow is running in the background (Ctrl+`)")
         self.term_btn.toggled.connect(self.toggle_console)
         h.addWidget(self.term_btn)
 
@@ -171,7 +171,7 @@ class MainWindow(QMainWindow):
 
     def _build_user_chip(self):
         self.user_chip = UserChip(self.display_name, avatar_text=self.email)
-        self.user_chip.setToolTip("Who ShotDeck is signed in as")
+        self.user_chip.setToolTip("Who Flow is signed in as")
         self.user_chip.clicked.connect(self._show_user_menu)
         # Kept for the tests and for anything that reads the header text.
         self.user_lbl = self.user_chip.name_lbl
@@ -248,7 +248,7 @@ class MainWindow(QMainWindow):
         QMessageBox.information(
             self, "Needs Attention",
             f"{item.headline()} on {item.version.get('code') or 'a version'}"
-            f"\n\nThis note is not linked to a task, so ShotDeck cannot open "
+            f"\n\nThis note is not linked to a task, so Flow cannot open "
             f"the task's version list for it.")
 
     def _full_task(self, task):
@@ -356,7 +356,7 @@ class MainWindow(QMainWindow):
             QMessageBox.information(
                 self, "Search",
                 f"'{task.get('content', 'That task')}' is not on a project "
-                f"ShotDeck can open.")
+                f"Flow can open.")
             return
         if not self.project or self.project["id"] != project["id"]:
             self._pending_task_id = task["id"]

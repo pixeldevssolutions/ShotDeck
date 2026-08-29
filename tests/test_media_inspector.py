@@ -6,7 +6,7 @@ import tempfile
 import config
 import media_inspector as mi
 
-TMP = tempfile.mkdtemp(prefix="shotdeck-media-")
+TMP = tempfile.mkdtemp(prefix="flow-media-")
 
 
 def _file(name, size=1024):

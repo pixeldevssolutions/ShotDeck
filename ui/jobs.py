@@ -1,6 +1,6 @@
 """Running something off the UI thread, once, correctly.
 
-Every background call in ShotDeck goes through here. The one subtlety worth
+Every background call in Flow goes through here. The one subtlety worth
 keeping in one place: QThreadPool takes ownership of the C++ runnable, but
 nothing holds the Python wrapper, and a collected wrapper takes its signals
 with it -- the callbacks then never fire and the UI waits forever. `run()`

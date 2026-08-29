@@ -1,4 +1,5 @@
 import os
+import shlex
 
 SG_SITE = os.environ.get("SG_SITE", "https://5and8.shotgrid.autodesk.com")
 SG_SCRIPT_NAME = os.environ.get("SG_SCRIPT_NAME", "SG_daemon")
@@ -71,23 +72,23 @@ ENTITY_SUBFOLDERS = [
 ]
 
 # Rocky 9 desktop: xdg-open picks the session's file manager. Override with
-# SHOTDECK_FILE_MANAGER=nautilus (or dolphin, thunar, nemo) if that misfires.
-FILE_MANAGER = os.environ.get("SHOTDECK_FILE_MANAGER", "xdg-open")
+# FLOW_FILE_MANAGER=nautilus (or dolphin, thunar, nemo) if that misfires.
+FILE_MANAGER = os.environ.get("FLOW_FILE_MANAGER", "xdg-open")
 
 # Two kill-switches for isolating a hard crash on a workstation. Both are on
 # by default; setting either to 0 removes a whole class of Qt work from the
 # grids without changing anything else, which is the fastest way to tell a
 # thumbnail/pixmap fault apart from a compositing one.
-#   SHOTDECK_THUMBNAILS=0    no downloads, no QPixmap decoding, initials only
-#   SHOTDECK_TILE_SHADOWS=0  no QGraphicsDropShadowEffect on the tiles
-THUMBNAILS_ENABLED = os.environ.get("SHOTDECK_THUMBNAILS", "1") != "0"
-TILE_SHADOWS_ENABLED = os.environ.get("SHOTDECK_TILE_SHADOWS", "1") != "0"
+#   FLOW_THUMBNAILS=0    no downloads, no QPixmap decoding, initials only
+#   FLOW_TILE_SHADOWS=0  no QGraphicsDropShadowEffect on the tiles
+THUMBNAILS_ENABLED = os.environ.get("FLOW_THUMBNAILS", "1") != "0"
+TILE_SHADOWS_ENABLED = os.environ.get("FLOW_TILE_SHADOWS", "1") != "0"
 
 # How long the opening sequence runs before it will hand over, even when the
 # window was ready sooner. The stages inside it are fractions of this, so one
-# number retimes the whole thing. SHOTDECK_SPLASH_MS=0 skips it entirely, which
+# number retimes the whole thing. FLOW_SPLASH_MS=0 skips it entirely, which
 # is what you want when relaunching the app twenty times in a row.
-SPLASH_MS = max(0, int(os.environ.get("SHOTDECK_SPLASH_MS", "6000")))
+SPLASH_MS = max(0, int(os.environ.get("FLOW_SPLASH_MS", "6000")))
 
 SOFTWARE_FIELDS = [
     "code", "sg_status_list", "image",
@@ -101,13 +102,13 @@ PROJECT_FIELDS = ["name", "sg_status", "image", "sg_description", "tank_name"]
 # Field on Software holding the rez request, e.g. "maya-2024 keentools-6.2".
 SOFTWARE_REZ_FIELD = "sg_rez_packages"
 # Package appended to every rez request so in-DCC tools can `import
-# shotdeck_context`. Set to "" to stop injecting it.
-REZ_CONTEXT_PACKAGE = "shotdeck_context"
+# flow_context`. Set to "" to stop injecting it.
+REZ_CONTEXT_PACKAGE = "flow_context"
 # Package that carries the in-DCC tools and their startup hooks. Appended the
 # same way, so launching a DCC is the whole install -- no artist ever copies a
-# userSetup.py. It requires shotdeck_context, so injecting it pulls in both.
-# Set to "" to launch DCCs without the ShotDeck menu.
-REZ_DCC_PACKAGE = "shotdeck_dcc"
+# userSetup.py. It requires flow_context, so injecting it pulls in both.
+# Set to "" to launch DCCs without the Flow menu.
+REZ_DCC_PACKAGE = "flow_dcc"
 
 # -- standalone publish ----------------------------------------------------
 
@@ -149,7 +150,7 @@ VERSION_PAGE_SIZE = 100
 # What "latest" means. ShotGrid's own timestamp, not the name: v010, v011, v002
 # is a real publishing order and max(name) gets it wrong. Set to "code" only if
 # a studio genuinely numbers versions in publish order.
-LATEST_VERSION_FIELD = os.environ.get("SHOTDECK_LATEST_VERSION_FIELD",
+LATEST_VERSION_FIELD = os.environ.get("FLOW_LATEST_VERSION_FIELD",
                                       "created_at")
 
 # Fields read for the Latest Version column. Deliberately small: this is one
@@ -164,7 +165,7 @@ SEARCH_DEBOUNCE_MS = 300
 # -- notes -----------------------------------------------------------------
 #
 # ShotGrid's Note/Reply model is the whole model: a Note links to entities
-# through note_links and replies are Reply rows pointing back at it. ShotDeck
+# through note_links and replies are Reply rows pointing back at it. Flow
 # keeps no notes of its own.
 NOTE_FIELDS = [
     "subject", "content", "user", "created_at", "updated_at",
@@ -184,7 +185,7 @@ NOTES_MIN_REFRESH_SECONDS = 5
 
 # How far back "needs attention" looks. Everything older has been dealt with
 # or has been overtaken by a newer version.
-REVIEW_WINDOW_DAYS = int(os.environ.get("SHOTDECK_REVIEW_DAYS", "30"))
+REVIEW_WINDOW_DAYS = int(os.environ.get("FLOW_REVIEW_DAYS", "30"))
 
 # Version statuses that mean somebody is waiting on the artist. Short codes,
 # because that is what the site stores -- check them against the site's own
@@ -199,10 +200,10 @@ REVIEW_STATUS_TYPES = {
 }
 
 # Which items have been looked at. Ids and timestamps, nothing else: ShotGrid
-# has no per-user read flag ShotDeck is allowed to write.
+# has no per-user read flag Flow is allowed to write.
 REVIEW_READ_STATE_PATH = os.environ.get(
-    "SHOTDECK_REVIEW_STATE",
-    os.path.expanduser("~/.shotdeck/review_read.json"))
+    "FLOW_REVIEW_STATE",
+    os.path.expanduser("~/.flow/review_read.json"))
 
 # Detail URL for an entity, used by "Open in ShotGrid".
 def entity_url(entity_type, entity_id):
@@ -244,7 +245,7 @@ def media_filter():
 
 # Media inspection. ffprobe reads movies and stills alike, including EXR and
 # DPX; without it the dialog falls back to Qt's image reader and file size.
-FFPROBE = os.environ.get("SHOTDECK_FFPROBE", "ffprobe")
+FFPROBE = os.environ.get("FLOW_FFPROBE", "ffprobe")
 FFPROBE_TIMEOUT = 20
 
 # -- where media is allowed to come from -----------------------------------
@@ -260,20 +261,20 @@ FFPROBE_TIMEOUT = 20
 #   "warn"          - allowed, with a warning the artist has to acknowledge.
 # Left at "warn" because the farm's mounts have not been confirmed yet; move it
 # to "approved_only" once they have. See HANDOFF §5e.
-PATH_POLICY = os.environ.get("SHOTDECK_PATH_POLICY", "warn")
+PATH_POLICY = os.environ.get("FLOW_PATH_POLICY", "warn")
 
 # Locations outside the project that are still legitimate to publish from --
 # shared plate stores, a vendor drop, a common elements library. {project} is
 # the tank_name, {project_name} the display name. Set from the environment as
 # a colon-separated list, or edit here.
 APPROVED_MEDIA_ROOTS = [
-    p for p in os.environ.get("SHOTDECK_APPROVED_MEDIA_ROOTS", "").split(os.pathsep)
+    p for p in os.environ.get("FLOW_APPROVED_MEDIA_ROOTS", "").split(os.pathsep)
     if p.strip()
 ]
 
 # The root every project lives under, used to tell "another show" apart from
 # "not a show at all". Taken from the shared prefix of ENTITY_PATH_TEMPLATES.
-JOBS_ROOT = os.environ.get("SHOTDECK_JOBS_ROOT", "/jobs")
+JOBS_ROOT = os.environ.get("FLOW_JOBS_ROOT", "/jobs")
 
 # Directories that are always the wrong place to publish from, matched on any
 # path component. Local scratch that no render node can see.
@@ -323,7 +324,7 @@ WORKFILE_EXTENSIONS = {
 #   "attachment"     - upload the file itself onto the Version. Simplest
 #                      permission-wise, but it copies the bytes into ShotGrid.
 #   "path_only"      - write the path onto the Version and nothing else.
-WORKFILE_MODE = os.environ.get("SHOTDECK_WORKFILE_MODE", "published_file")
+WORKFILE_MODE = os.environ.get("FLOW_WORKFILE_MODE", "published_file")
 
 # Fields used when WORKFILE_MODE is "published_file". All stock names.
 PUBLISHED_FILE_TASK_FIELD = "task"
@@ -350,16 +351,16 @@ PUBLISHED_FILE_TYPES = {
 # Text field on Version holding the work file path, so the path is visible
 # without opening the PublishedFile. Leave "" to append it to the description
 # instead, which is the only text field every site is guaranteed to have.
-VERSION_WORKFILE_FIELD = os.environ.get("SHOTDECK_VERSION_WORKFILE_FIELD", "")
+VERSION_WORKFILE_FIELD = os.environ.get("FLOW_VERSION_WORKFILE_FIELD", "")
 
-# rez entry point. Set SHOTDECK_REZ_EXECUTABLE to an absolute path when the
+# rez entry point. Set FLOW_REZ_EXECUTABLE to an absolute path when the
 # artist's login shell does not put rez on PATH.
-REZ_EXECUTABLE = os.environ.get("SHOTDECK_REZ_EXECUTABLE", "rez")
+REZ_EXECUTABLE = os.environ.get("FLOW_REZ_EXECUTABLE", "rez")
 
 # Released DCC packages, one folder per package and per version inside it.
 # The right-click menu on a task is built from this tree.
 DCC_PACKAGES_ROOT = os.environ.get(
-    "SHOTDECK_DCC_ROOT", "/software/packages/dcc")
+    "FLOW_DCC_ROOT", "/software/packages/dcc")
 
 # Fallback for checking whether a package exists, used only when
 # REZ_PACKAGES_PATH is not already in the environment. Mirrors the search
@@ -396,15 +397,39 @@ DCC_LABELS = {
 ENVS_DIR = os.path.join(os.path.dirname(__file__), "envs")
 
 # Source tree of the in-DCC tools, laid out the same way the rez package
-# installs them (shotdeck_dcc/ importable, startup/<dcc>/ per host). Launches
+# installs them (flow_dcc/ importable, startup/<dcc>/ per host). Launches
 # point PYTHONPATH here so the menu appears even when the rez package is not
 # released or the Software entity requests no rez packages at all. A resolved
-# shotdeck_dcc prepends its own copy, so it still wins when present.
+# flow_dcc prepends its own copy, so it still wins when present.
 DCC_SOURCE_ROOT = os.environ.get(
-    "SHOTDECK_DCC_SOURCE",
-    os.path.join(os.path.dirname(__file__), "rez", "shotdeck_dcc"))
+    "FLOW_DCC_SOURCE",
+    os.path.join(os.path.dirname(__file__), "rez", "flow_dcc"))
 CONTEXT_SOURCE_ROOT = os.environ.get(
-    "SHOTDECK_CONTEXT_SOURCE",
-    os.path.join(os.path.dirname(__file__), "rez", "shotdeck_context"))
+    "FLOW_CONTEXT_SOURCE",
+    os.path.join(os.path.dirname(__file__), "rez", "flow_context"))
 
-APP_TITLE = "PixelDesk"
+# --- OpenRV review player ---------------------------------------------------
+# Review runs through RV rather than Flow's own QMediaPlayer: EXR sequences,
+# colour management and A/B compare are all things RV has and Qt does not.
+#
+# RV is launched through rez (`rez env openrv -- rv`) so it arrives with its own
+# environment. Set FLOW_RV to an absolute path only to bypass rez entirely --
+# point it at the `rv` wrapper, not rv.bin, or RV starts without RV_HOME.
+RV_EXECUTABLE = os.environ.get("FLOW_RV", "")
+RV_PACKAGE = os.environ.get("FLOW_RV_PACKAGE", "openrv")
+# Pin a version here; empty means the newest one released in the rez tree.
+RV_VERSION = os.environ.get("FLOW_RV_VERSION", "")
+# Last-resort search when rez is not on PATH for this session. Matches the farm
+# layout: openrv/<version>/platform-linux/os-rocky-9.6/bin/rv
+# Joined with "/" rather than os.path.join: DCC_PACKAGES_ROOT is a POSIX mount
+# on the farm, and a Windows dev box would otherwise build a pattern with
+# separators glob can never match.
+RV_GLOB = os.environ.get(
+    "FLOW_RV_GLOB",
+    "/".join([DCC_PACKAGES_ROOT.rstrip("/"), RV_PACKAGE, "*", "platform-*",
+              "os-*", "bin", "rv"]))
+# Flags every review gets. Empty by default -- the artist's own RV preferences
+# should win. e.g. FLOW_RV_ARGS="-fullscreen -nofloat"
+RV_ARGS = shlex.split(os.environ.get("FLOW_RV_ARGS", ""))
+
+APP_TITLE = "Flow"
