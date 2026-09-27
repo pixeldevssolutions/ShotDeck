@@ -27,9 +27,11 @@ def build_env(project, software, extra=None):
         "SOFTWARE": software["code"] if software else "",
     }
 
-    def apply(section):
+    def apply(section, expand=True):
         for k, v in (section or {}).items():
-            v = str(v).format(**tokens, **env)
+            v = str(v)
+            if expand:
+                v = v.format(**tokens, **env)
             if k.endswith("+"):  # PATH+: prepend style
                 k = k[:-1]
                 env[k] = v + os.pathsep + env.get(k, "")
@@ -42,7 +44,9 @@ def build_env(project, software, extra=None):
         sw_key = software["code"].lower()
         apply((default.get("software") or {}).get(sw_key))
         apply((proj_cfg.get("software") or {}).get(sw_key))
-    apply(extra)
+    # Extras are literal values computed by Flow, not YAML templates -- some
+    # (FLOW_ASSET_PATH_TEMPLATE) carry {placeholders} meant for the DCC side.
+    apply(extra, expand=False)
 
     env.update({f"SGDESK_{k}": v for k, v in tokens.items()})
     return env
