@@ -2,8 +2,9 @@
 
 The first question an artist has when Flow opens is "what am I working on".
 This answers it without picking a project first. Double-clicking a task opens
-its project and lands on the task, the same place the header search goes, so
-launch, publish and folder actions all work from there unchanged.
+its project and lands on the task, the same place the header search goes.
+Right-click gives the same task menu as the project page (TaskMenu), acting on
+the task's own project, so there is no second copy of those actions.
 
 "Open" means any status not in config.TASK_DONE_STATUSES. That filter runs on
 the server, so finished work never crosses the wire. The filters on this page
@@ -11,6 +12,8 @@ run in memory over the list that came back.
 """
 
 import datetime
+
+import config
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
@@ -22,6 +25,7 @@ from PySide6.QtWidgets import (
 
 from . import theme
 from .branding import LoadingPage
+from .software_page import TaskMenu
 from .widgets import DueDate, EmptyState, StatusPill
 
 ALL = ""
@@ -80,13 +84,20 @@ def filter_tasks(tasks, text="", project_id=None, step=ALL, status=ALL,
     return out
 
 
-class HomeTasks(QWidget):
+class HomeTasks(TaskMenu, QWidget):
     COLS = ["Task", "Link", "Project", "Step", "Status", "Due"]
     COL_STATUS = 4
     COL_DUE = 5
 
     task_opened = Signal(object)          # the Task dict
     refresh_requested = Signal()
+    # The task menu's actions, as on the project page's TasksTable.
+    package_launched = Signal(object, str, str)
+    folder_requested = Signal(str)
+    latest_version_requested = Signal(object, object)
+    status_change_requested = Signal(object, str)
+    publish_requested = Signal(object)
+    versions_requested = Signal(object)
 
     def __init__(self):
         super().__init__()
@@ -94,6 +105,11 @@ class HomeTasks(QWidget):
         self._rows = []
         self._status_labels = {}
         self._loading = False
+        self._projects = {}          # id -> full Project dict, for folders
+        self._statuses = []          # [(code, label), ...] for TaskMenu
+        self._latest = {}            # task id -> newest Version
+        self._attention = {}         # the review dots are project-page only
+        self._packages = []
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(24, 18, 24, 8)
@@ -129,7 +145,7 @@ class HomeTasks(QWidget):
         for key, label in DUE_CHOICES:
             self.due_box.addItem(label, key)
         filters.addStretch()
-        hint = QLabel("Double-click a task to open it")
+        hint = QLabel("Double-click to open a task, right-click for actions")
         hint.setObjectName("tileSub")
         filters.addWidget(hint)
         lay.addLayout(filters)
@@ -161,6 +177,8 @@ class HomeTasks(QWidget):
                                             StatusPill(self.table))
         self.table.setItemDelegateForColumn(self.COL_DUE, DueDate(self.table))
         self.table.cellDoubleClicked.connect(self._open_row)
+        self.table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._on_context_menu)
         self.stack.addWidget(self.table)
 
         self.empty = EmptyState(
@@ -192,8 +210,25 @@ class HomeTasks(QWidget):
             self.stack.setCurrentWidget(self.loading)
 
     def set_statuses(self, statuses):
-        self._status_labels = dict(statuses)
+        self._statuses = statuses or []
+        self._status_labels = dict(self._statuses)
         self._fill_choices()
+
+    def set_projects(self, projects):
+        self._projects = {p["id"]: p for p in projects or []}
+
+    def _menu_project(self, task):
+        """The task's full project: folder paths need its tank_name."""
+        link = task.get("project") or {}
+        return self._projects.get(link.get("id")) or (link or None)
+
+    def update_task(self, task_id, code):
+        """A status write from the menu. Finished tasks leave the list."""
+        if code in config.TASK_DONE_STATUSES:
+            self._tasks = [t for t in self._tasks if t["id"] != task_id]
+            self._rebuild()
+            return
+        super().update_task(task_id, code)
 
     def set_tasks(self, tasks):
         self._tasks = tasks

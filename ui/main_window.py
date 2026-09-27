@@ -168,6 +168,13 @@ class MainWindow(QMainWindow):
         self.project_page.project_selected.connect(self.open_project)
         self.home_tasks.task_opened.connect(self.goto_task)
         self.home_tasks.refresh_requested.connect(self._load_open_tasks)
+        self.home_tasks.package_launched.connect(self.launch_package)
+        self.home_tasks.folder_requested.connect(self.open_folder)
+        self.home_tasks.status_change_requested.connect(self.set_task_status)
+        self.home_tasks.publish_requested.connect(self.publish_version)
+        self.home_tasks.versions_requested.connect(self.view_versions)
+        self.home_tasks.latest_version_requested.connect(
+            self.open_latest_version)
         self.software_page.software_launched.connect(self.launch_software)
         self.software_page.task_selected.connect(self._on_task_selected)
         self.software_page.package_launched.connect(self.launch_package)
@@ -314,7 +321,7 @@ class MainWindow(QMainWindow):
         """Open the task's newest version, selected in the browser."""
         self.task = task
         self.software_page.set_task(task)
-        browser = VersionBrowser(self.sg, self.project, task, self)
+        browser = VersionBrowser(self.sg, self._task_project(task), task, self)
         browser.select_version(version["id"])
         browser.exec()
 
@@ -374,15 +381,26 @@ class MainWindow(QMainWindow):
         else:
             self.statusBar().showMessage(f"Connected — {len(projects)} projects")
         self.project_page.set_projects(projects)
+        self.home_tasks.set_projects(projects)
         self._load_open_tasks()
 
     def _load_open_tasks(self):
         """The home page's task list: every unfinished task, all projects."""
         self.home_tasks.set_loading()
-        self._run(self.sg.open_tasks, self.home_tasks.set_tasks,
+        self._run(self.sg.open_tasks, self._on_open_tasks,
                   on_error=lambda m: (
                       log.warning("could not load open tasks: %s", m),
                       self.home_tasks.set_tasks([])))
+
+    def _on_open_tasks(self, tasks):
+        self.home_tasks.set_tasks(tasks)
+        if tasks:
+            # For the menu's Latest Version entry: one query for the lot.
+            self._run(self.sg.latest_versions_for_tasks,
+                      self.home_tasks.set_latest_versions,
+                      [t["id"] for t in tasks],
+                      on_error=lambda m: log.warning(
+                          "could not read latest versions: %s", m))
 
     # -- searching every project's tasks -------------------------------------
 
@@ -414,6 +432,14 @@ class MainWindow(QMainWindow):
             if project["id"] == link.get("id"):
                 return project
         return link if link.get("id") else None
+
+    def _task_project(self, task):
+        """The project a task action runs in: the task's own, not the page's.
+
+        The home page's menu acts on tasks from every project, so the
+        handlers cannot assume the open project is the right one.
+        """
+        return self._project_for(task) or self.project
 
     def _select_task(self, task_id):
         if self.software_page.select_task(task_id):
@@ -486,7 +512,8 @@ class MainWindow(QMainWindow):
         self.software_page.set_task(task)
         try:
             pid, log_path = launcher.launch_package(
-                self.project, package, version, task, self.login, self.email)
+                self._task_project(task), package, version, task,
+                self.login, self.email)
         except Exception as e:
             self._launch_failed(f"{package}-{version}", e)
             return
@@ -516,7 +543,8 @@ class MainWindow(QMainWindow):
         log.info("standalone publish for task %s (%s)",
                  task["id"], task.get("content", ""))
 
-        dialog = PublishDialog(self.sg, self.project, task, self.email, self)
+        dialog = PublishDialog(self.sg, self._task_project(task), task,
+                               self.email, self)
         dialog.exec()
         result = dialog.published
         if result:
@@ -541,7 +569,7 @@ class MainWindow(QMainWindow):
         log.info("version browser for %s %s (task %s)",
                  task["entity"].get("type"), task["entity"].get("name"),
                  task["id"])
-        VersionBrowser(self.sg, self.project, task, self).exec()
+        VersionBrowser(self.sg, self._task_project(task), task, self).exec()
 
     def set_task_status(self, task, code):
         """Write a status change back to ShotGrid, off the UI thread."""
@@ -551,6 +579,7 @@ class MainWindow(QMainWindow):
             f"Setting '{task.get('content', '')}' to {code}…")
         # Show it straight away; put it back if the write fails.
         self.software_page.update_task_status(task_id, code)
+        self.home_tasks.update_task(task_id, code)
 
         def write():
             self.sg.set_task_status(task_id, code)
@@ -564,6 +593,7 @@ class MainWindow(QMainWindow):
         def failed(msg):
             log.error("could not set status on task %s: %s", task_id, msg)
             self.software_page.update_task_status(task_id, old)
+            self._load_open_tasks()      # may have dropped it as finished
             self.show_console()
             QMessageBox.warning(
                 self, "Status not changed",

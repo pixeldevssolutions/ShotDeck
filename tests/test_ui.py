@@ -1005,6 +1005,53 @@ def test_home_shows_open_tasks_and_opens_one_on_double_click():
     assert win.task and win.task["id"] == home._rows[0]["id"]
 
 
+def test_home_menu_folders_use_the_tasks_own_project():
+    from ui.home_tasks import HomeTasks
+
+    home = HomeTasks()
+    home.set_projects([fakes.PROJECT, OTHER_PROJECT])
+    task = dict(fakes.TASK, project={"type": "Project",
+                                     "id": OTHER_PROJECT["id"],
+                                     "name": OTHER_PROJECT["name"]},
+                **{"entity.Shot.sg_sequence": {"name": "SEQ001"}})
+    menu = QMenu()
+    home._add_folder_actions(menu, task)
+    tips = [a.toolTip() for a in menu.actions()]
+    assert "/jobs/SHOW002/sequences/SEQ001/shots/SH010" in tips
+
+
+def test_home_menu_actions_run_in_the_tasks_project_not_the_open_one():
+    import launcher
+
+    sg = _searchable()
+    win = MainWindowFor(sg)
+    win.open_project(fakes.PROJECT)          # a different show is open
+    settle()
+    target = [t for t in sg.tasks
+              if t["project"]["id"] == OTHER_PROJECT["id"]][0]
+
+    seen = []
+    original = launcher.launch_package
+    launcher.launch_package = lambda project, *a, **k: (
+        seen.append(project), (1, os.path.join(TMP, "x.log")))[1]
+    try:
+        win.home_tasks.package_launched.emit(target, "nuke", "16.0v7")
+    finally:
+        launcher.launch_package = original
+    assert seen and seen[0]["id"] == OTHER_PROJECT["id"]
+
+
+def test_marking_a_task_finished_drops_it_from_home():
+    from ui.home_tasks import HomeTasks
+
+    home = HomeTasks()
+    home.set_tasks([dict(fakes.TASK, id=1), dict(fakes.TASK, id=2)])
+    home.update_task(1, "fin")
+    assert [t["id"] for t in home._rows] == [2]
+    home.update_task(2, "hld")
+    assert home._rows[0]["sg_status_list"] == "hld"
+
+
 def MainWindowFor(sg):
     from ui.main_window import MainWindow
 
