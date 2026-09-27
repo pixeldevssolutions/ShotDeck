@@ -1,0 +1,159 @@
+"""The tools paths a launch adds: rez first, source tree only as a fallback."""
+
+import importlib.machinery
+import os
+import shutil
+import tempfile
+
+import config
+import launcher
+from env_resolver import build_env
+
+MAYA_STARTUP = os.path.join(config.DCC_SOURCE_ROOT, "startup", "maya")
+NUKE_STARTUP = os.path.join(config.DCC_SOURCE_ROOT, "startup", "nuke")
+
+# What _rez_packages() returns once flow_dcc has been built and injected.
+RESOLVED = ["maya-2026", "flow_context", "flow_dcc"]
+
+TMP = tempfile.mkdtemp(prefix="flow-launch-")
+
+
+def _paths(code, rez_pkgs=()):
+    return launcher._tools_paths({"code": code}, rez_pkgs)
+
+
+def _entries(paths, key="PYTHONPATH+"):
+    return paths.get(key, "").split(os.pathsep) if paths.get(key) else []
+
+
+# -- case B: no rez package, the source tree fills in ------------------------
+
+def test_the_source_tree_is_used_when_rez_has_no_flow_package():
+    entries = _entries(_paths("Maya"))
+    assert entries[:2] == [config.DCC_SOURCE_ROOT, config.CONTEXT_SOURCE_ROOT]
+    assert os.path.isdir(os.path.join(config.DCC_SOURCE_ROOT, "flow_dcc"))
+
+
+def test_maya_gets_its_userSetup_folder_and_nuke_does_not():
+    maya = _paths("Maya")
+    assert MAYA_STARTUP in _entries(maya)
+    assert "NUKE_PATH+" not in maya
+
+    nuke = _paths("NukeX")
+    assert nuke["NUKE_PATH+"] == NUKE_STARTUP
+    assert MAYA_STARTUP not in _entries(nuke)
+
+
+def test_an_existing_pythonpath_is_kept_and_comes_last():
+    project = {"id": 1, "name": "UAT6", "tank_name": "uat6"}
+    env = build_env(project, {"code": "Maya"},
+                    extra={"PYTHONPATH": "/studio/lib", **_paths("Maya")})
+    entries = env["PYTHONPATH"].split(os.pathsep)
+    assert entries[:3] == [config.DCC_SOURCE_ROOT, config.CONTEXT_SOURCE_ROOT,
+                           MAYA_STARTUP]
+    assert entries[-1] == "/studio/lib"
+
+
+def test_launch_extras_keep_their_placeholders():
+    # FLOW_ASSET_PATH_TEMPLATE is filled in DCC-side; expanding it here raised
+    # KeyError('asset_type') and every launch failed.
+    project = {"id": 1, "name": "UAT6", "tank_name": "uat6"}
+    template = "/jobs/uat6/assets/{asset_type}/{asset}"
+    env = build_env(project, {"code": "NukeX"},
+                    extra={"FLOW_ASSET_PATH_TEMPLATE": template})
+    assert env["FLOW_ASSET_PATH_TEMPLATE"] == template
+
+
+def test_the_fallback_survives_rez_resetting_pythonpath():
+    tools = _paths("Maya")
+    env = {}
+    launcher._keep_tools_paths_through_rez(
+        [config.REZ_EXECUTABLE, "env"], env, tools)
+    assert env["REZ_PARENT_VARIABLES"].split(",") == ["PYTHONPATH"]
+
+
+def test_a_plain_exe_launch_needs_no_rez_variable():
+    env = {}
+    launcher._keep_tools_paths_through_rez(
+        ["/usr/autodesk/maya/bin/maya"], env, _paths("Maya"))
+    assert env == {}
+
+
+# -- case A: the rez package is resolved and stays authoritative -------------
+
+def test_nothing_is_added_when_rez_resolves_flow_dcc():
+    assert _paths("Maya", RESOLVED) == {}
+    assert _paths("NukeX", RESOLVED) == {}
+
+
+def test_rez_launches_are_left_alone_when_the_package_is_resolved():
+    env = {}
+    launcher._keep_tools_paths_through_rez(
+        [config.REZ_EXECUTABLE, "env"], env, _paths("Maya", RESOLVED))
+    assert env == {}, "rez's own environment must not be touched"
+
+
+def test_the_context_source_is_dropped_on_its_own_when_rez_has_it():
+    entries = _entries(_paths("Maya", ["maya-2026", "flow_context"]))
+    assert config.CONTEXT_SOURCE_ROOT not in entries
+    assert config.DCC_SOURCE_ROOT in entries
+
+
+# -- a DCC must outlive the launcher that started it -------------------------
+
+def _with_scopes(available):
+    """Pin the probe result, so the tests never touch the real systemd."""
+    launcher._SCOPES_WORK = available
+    try:
+        return launcher.outlive_flow(
+            [config.REZ_EXECUTABLE, "env", "maya"], "Maya")
+    finally:
+        launcher._SCOPES_WORK = None
+
+
+def test_the_dcc_gets_a_scope_of_its_own_when_systemd_can_give_one():
+    spawn = _with_scopes(True)
+    assert spawn[:5] == ["systemd-run", "--user", "--scope", "--quiet",
+                         "--collect"]
+    assert spawn[5:] == [config.REZ_EXECUTABLE, "env", "maya"]
+    # A generated unit name, so two DCCs from one Flow cannot collide.
+    assert "--unit" not in spawn
+
+
+def test_the_command_is_untouched_where_scopes_do_not_work():
+    assert _with_scopes(False) == [config.REZ_EXECUTABLE, "env", "maya"]
+
+
+# -- precedence: which flow_dcc an interpreter would actually import -----
+
+def _fake_rez_install():
+    """A released package laid out the way REZ_INSTALLER.py installs it."""
+    root = os.path.join(TMP, "installed", "flow_dcc", "1.0.0", "python")
+    package = os.path.join(root, "flow_dcc")
+    if not os.path.isdir(package):
+        os.makedirs(package)
+    open(os.path.join(package, "__init__.py"), "w").close()
+    return root
+
+
+def _resolves_to(path_entries):
+    spec = importlib.machinery.PathFinder.find_spec("flow_dcc",
+                                                    path_entries)
+    return spec.origin
+
+
+def test_the_released_package_wins_when_both_are_on_pythonpath():
+    # rez prepends its own copy onto whatever it inherited, so even if the
+    # source tree is still in the environment the installed one is imported.
+    installed = _fake_rez_install()
+    assert _resolves_to([installed, config.DCC_SOURCE_ROOT]) == \
+        os.path.join(installed, "flow_dcc", "__init__.py")
+
+
+def test_the_source_tree_is_what_imports_without_a_released_package():
+    assert _resolves_to([config.DCC_SOURCE_ROOT]) == \
+        os.path.join(config.DCC_SOURCE_ROOT, "flow_dcc", "__init__.py")
+
+
+def teardown_module():
+    shutil.rmtree(TMP, ignore_errors=True)
