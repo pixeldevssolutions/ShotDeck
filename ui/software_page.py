@@ -89,146 +89,15 @@ class SoftwareGrid(QWidget):
         self._resize_timer.start()
 
 
-class TasksTable(QWidget):
-    COLS = ["Task", "Link", "Step", "Status", "Latest Version", "Due"]
-    COL_STATUS = 3
-    COL_LATEST = 4
-    COL_DUE = 5
+class TaskMenu:
+    """The right-click menu for a task row, shared by every task table.
 
-    task_selected = Signal(object)          # the Task dict, or None
-    package_launched = Signal(object, str, str)   # task, package, version
-    folder_requested = Signal(str)                # absolute path to open
-    latest_version_requested = Signal(object, object)   # task, version
-    status_change_requested = Signal(object, str)   # task, new status code
-    publish_requested = Signal(object)              # task
-    versions_requested = Signal(object)             # task
-
-    def __init__(self):
-        super().__init__()
-        self._tasks = []
-        self._rows = []              # row index -> task dict, after filtering
-        self._packages = []          # [(package, [versions]), ...] from disk
-        self._project = None         # needed to build folder paths
-        self._statuses = []          # [(code, label), ...] from the SG schema
-        self._latest = {}            # task id -> newest Version, one query
-        self._loading = False        # waiting on the first set_tasks()
-        self._attention = {}         # task id -> why it needs attention
-
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(24, 16, 24, 16)
-        lay.setSpacing(12)
-
-        top = QHBoxLayout()
-        self.search = QLineEdit()
-        self.search.setPlaceholderText("Filter tasks")
-        self.search.setClearButtonEnabled(True)
-        self.search.setFixedWidth(260)
-        self.search.textChanged.connect(self._rebuild)
-        top.addWidget(self.search)
-
-        self.hint = QLabel("Right-click a task to open its folder or launch an app")
-        self.hint.setObjectName("tileSub")
-        top.addWidget(self.hint)
-        top.addStretch()
-
-        self.count = QLabel("")
-        self.count.setObjectName("tileSub")
-        top.addWidget(self.count)
-        lay.addLayout(top)
-
-        self.stack = QStackedWidget()
-        lay.addWidget(self.stack)
-
-        self.table = QTableWidget(0, len(self.COLS))
-        self.table.setHorizontalHeaderLabels(self.COLS)
-        header = self.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.Stretch)          # Task
-        header.setSectionResizeMode(1, QHeaderView.ResizeToContents) # Link
-        header.setSectionResizeMode(2, QHeaderView.ResizeToContents) # Step
-        header.setSectionResizeMode(self.COL_STATUS, QHeaderView.Fixed)
-        header.setSectionResizeMode(self.COL_LATEST, QHeaderView.Fixed)
-        header.setSectionResizeMode(self.COL_DUE, QHeaderView.Fixed)
-        header.resizeSection(self.COL_STATUS, 110)
-        header.resizeSection(self.COL_LATEST, 150)
-        header.resizeSection(self.COL_DUE, 110)
-        header.setHighlightSections(False)
-        self.table.verticalHeader().hide()
-        self.table.verticalHeader().setDefaultSectionSize(38)
-        self.table.setShowGrid(False)
-        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.table.setSelectionMode(QTableWidget.SingleSelection)
-        self.table.setMouseTracking(True)      # so ::item:hover works
-        self.table.setFocusPolicy(Qt.NoFocus)  # no dotted focus rectangle
-        self.table.setItemDelegateForColumn(self.COL_STATUS,
-                                            StatusPill(self.table))
-        self.table.setItemDelegateForColumn(self.COL_DUE, DueDate(self.table))
-        self.table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
-        self.table.itemSelectionChanged.connect(self._on_selection)
-        self.table.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.table.customContextMenuRequested.connect(self._on_context_menu)
-        self.stack.addWidget(self.table)
-
-        self.empty = EmptyState(
-            "✓", "No tasks assigned to you on this project",
-            "Tasks are matched on the sg_assigned_to field. If you expect "
-            "tasks here, check the Terminal panel and README for how the "
-            "match is configured.")
-        self.stack.addWidget(self.empty)
-
-        self.loading = LoadingPage("Loading your tasks...")
-        self.stack.addWidget(self.loading)
-
-    def set_loading(self):
-        """Show the pulsing logo until set_tasks() says what actually arrived.
-
-        Without this the table shows the "no tasks assigned" empty state for as
-        long as the ShotGrid query takes, which reads as an answer rather than
-        a wait.
-        """
-        self._loading = True
-        self.stack.setCurrentWidget(self.loading)
-
-    def set_tasks(self, tasks):
-        self._tasks = tasks
-        self._loading = False
-        self._rebuild()
-
-    def _selected_task_id(self):
-        rows = self.table.selectionModel().selectedRows()
-        if not rows:
-            return None
-        r = rows[0].row()
-        return self._rows[r]["id"] if r < len(self._rows) else None
-
-    def _on_selection(self):
-        rows = self.table.selectionModel().selectedRows()
-        if not rows:
-            self.task_selected.emit(None)
-            return
-        r = rows[0].row()
-        self.task_selected.emit(self._rows[r] if r < len(self._rows) else None)
-
-    def set_project(self, project):
-        self._project = project
-
-    def select_task(self, task_id):
-        """Select and scroll to a task by id. False when it is not on the page.
-
-        The filter box is cleared first: arriving from the header search only
-        to land on an empty table because a stale filter hides the task is a
-        worse answer than losing the filter.
-        """
-        if not any(t["id"] == task_id for t in self._tasks):
-            return False
-        if self.search.text():
-            self.search.clear()          # clearing rebuilds the table
-        for row, task in enumerate(self._rows):
-            if task["id"] == task_id:
-                self.table.selectRow(row)
-                self.table.scrollToItem(self.table.item(row, 0))
-                return True
-        return False
+    The class using it provides `table`, `_rows`, `_tasks`, `_statuses`,
+    `_latest`, `_attention`, `_rebuild()`, `_menu_project(task)` and the
+    signals the actions emit (package_launched, folder_requested,
+    latest_version_requested, status_change_requested, publish_requested,
+    versions_requested).
+    """
 
     def _on_context_menu(self, pos):
         """Right-click a task: open its folder, or launch a DCC on it."""
@@ -379,7 +248,8 @@ class TasksTable(QWidget):
         self._rebuild()
 
     def _add_folder_actions(self, menu, task):
-        entries = paths.folders(self._project, task) if self._project else []
+        project = self._menu_project(task)
+        entries = paths.folders(project, task) if project else []
         if not entries:
             act = menu.addAction("No folder path for this task")
             act.setEnabled(False)
@@ -409,6 +279,151 @@ class TasksTable(QWidget):
         copy.triggered.connect(
             lambda _=False, p=root_path: QApplication.clipboard().setText(p))
         sub.addAction(copy)
+
+
+class TasksTable(TaskMenu, QWidget):
+    COLS = ["Task", "Link", "Step", "Status", "Latest Version", "Due"]
+    COL_STATUS = 3
+    COL_LATEST = 4
+    COL_DUE = 5
+
+    task_selected = Signal(object)          # the Task dict, or None
+    package_launched = Signal(object, str, str)   # task, package, version
+    folder_requested = Signal(str)                # absolute path to open
+    latest_version_requested = Signal(object, object)   # task, version
+    status_change_requested = Signal(object, str)   # task, new status code
+    publish_requested = Signal(object)              # task
+    versions_requested = Signal(object)             # task
+
+    def __init__(self):
+        super().__init__()
+        self._tasks = []
+        self._rows = []              # row index -> task dict, after filtering
+        self._packages = []          # [(package, [versions]), ...] from disk
+        self._project = None         # needed to build folder paths
+        self._statuses = []          # [(code, label), ...] from the SG schema
+        self._latest = {}            # task id -> newest Version, one query
+        self._loading = False        # waiting on the first set_tasks()
+        self._attention = {}         # task id -> why it needs attention
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(24, 16, 24, 16)
+        lay.setSpacing(12)
+
+        top = QHBoxLayout()
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("Filter tasks")
+        self.search.setClearButtonEnabled(True)
+        self.search.setFixedWidth(260)
+        self.search.textChanged.connect(self._rebuild)
+        top.addWidget(self.search)
+
+        self.hint = QLabel("Right-click a task to open its folder or launch an app")
+        self.hint.setObjectName("tileSub")
+        top.addWidget(self.hint)
+        top.addStretch()
+
+        self.count = QLabel("")
+        self.count.setObjectName("tileSub")
+        top.addWidget(self.count)
+        lay.addLayout(top)
+
+        self.stack = QStackedWidget()
+        lay.addWidget(self.stack)
+
+        self.table = QTableWidget(0, len(self.COLS))
+        self.table.setHorizontalHeaderLabels(self.COLS)
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.Stretch)          # Task
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents) # Link
+        header.setSectionResizeMode(2, QHeaderView.ResizeToContents) # Step
+        header.setSectionResizeMode(self.COL_STATUS, QHeaderView.Fixed)
+        header.setSectionResizeMode(self.COL_LATEST, QHeaderView.Fixed)
+        header.setSectionResizeMode(self.COL_DUE, QHeaderView.Fixed)
+        header.resizeSection(self.COL_STATUS, 110)
+        header.resizeSection(self.COL_LATEST, 150)
+        header.resizeSection(self.COL_DUE, 110)
+        header.setHighlightSections(False)
+        self.table.verticalHeader().hide()
+        self.table.verticalHeader().setDefaultSectionSize(38)
+        self.table.setShowGrid(False)
+        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.table.setSelectionMode(QTableWidget.SingleSelection)
+        self.table.setMouseTracking(True)      # so ::item:hover works
+        self.table.setFocusPolicy(Qt.NoFocus)  # no dotted focus rectangle
+        self.table.setItemDelegateForColumn(self.COL_STATUS,
+                                            StatusPill(self.table))
+        self.table.setItemDelegateForColumn(self.COL_DUE, DueDate(self.table))
+        self.table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+        self.table.itemSelectionChanged.connect(self._on_selection)
+        self.table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._on_context_menu)
+        self.stack.addWidget(self.table)
+
+        self.empty = EmptyState(
+            "✓", "No tasks assigned to you on this project",
+            "Tasks are matched on the sg_assigned_to field. If you expect "
+            "tasks here, check the Terminal panel and README for how the "
+            "match is configured.")
+        self.stack.addWidget(self.empty)
+
+        self.loading = LoadingPage("Loading your tasks...")
+        self.stack.addWidget(self.loading)
+
+    def set_loading(self):
+        """Show the pulsing logo until set_tasks() says what actually arrived.
+
+        Without this the table shows the "no tasks assigned" empty state for as
+        long as the ShotGrid query takes, which reads as an answer rather than
+        a wait.
+        """
+        self._loading = True
+        self.stack.setCurrentWidget(self.loading)
+
+    def set_tasks(self, tasks):
+        self._tasks = tasks
+        self._loading = False
+        self._rebuild()
+
+    def _selected_task_id(self):
+        rows = self.table.selectionModel().selectedRows()
+        if not rows:
+            return None
+        r = rows[0].row()
+        return self._rows[r]["id"] if r < len(self._rows) else None
+
+    def _on_selection(self):
+        rows = self.table.selectionModel().selectedRows()
+        if not rows:
+            self.task_selected.emit(None)
+            return
+        r = rows[0].row()
+        self.task_selected.emit(self._rows[r] if r < len(self._rows) else None)
+
+    def set_project(self, project):
+        self._project = project
+
+    def _menu_project(self, task):
+        return self._project
+
+    def select_task(self, task_id):
+        """Select and scroll to a task by id. False when it is not on the page.
+
+        The filter box is cleared first: arriving from the header search only
+        to land on an empty table because a stale filter hides the task is a
+        worse answer than losing the filter.
+        """
+        if not any(t["id"] == task_id for t in self._tasks):
+            return False
+        if self.search.text():
+            self.search.clear()          # clearing rebuilds the table
+        for row, task in enumerate(self._rows):
+            if task["id"] == task_id:
+                self.table.selectRow(row)
+                self.table.scrollToItem(self.table.item(row, 0))
+                return True
+        return False
 
     def _rebuild(self):
         text = self.search.text().lower()
