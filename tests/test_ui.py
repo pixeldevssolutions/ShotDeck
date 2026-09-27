@@ -19,7 +19,7 @@ import fakes
 import publish_service
 
 app = None
-TMP = tempfile.mkdtemp(prefix="shotdeck-ui-")
+TMP = tempfile.mkdtemp(prefix="flow-ui-")
 PNG = os.path.join(TMP, "SH010_comp_v004.png")
 NK = os.path.join(TMP, "SH010_comp_v004.nk")
 
@@ -247,6 +247,27 @@ def _browser(sg):
     browser.show()
     settle()
     return browser
+
+
+def test_comparing_two_playable_versions_wipes_them_in_rv():
+    import rv_player
+    sg = fakes.FakeShotgun()
+    for i in (1, 2):
+        sg.add_version(f"SH010_Comp_v00{i}")
+    browser = _browser(sg)
+    a, b = browser._versions[0], browser._versions[1]
+    sent = {}
+    playable, open_versions = rv_player.playable, rv_player.open_versions
+    rv_player.playable = lambda v: True
+    rv_player.open_versions = (lambda versions, mode="", project=None:
+                               sent.update(versions=versions, mode=mode)
+                               or (1, "log"))
+    try:
+        browser._compare(a, b)
+    finally:
+        rv_player.playable, rv_player.open_versions = playable, open_versions
+    assert sent["mode"] == "wipe"
+    assert sent["versions"] == [a, b]
 
 
 def test_browser_lists_versions_newest_first():

@@ -1,4 +1,4 @@
-"""Active Directory authentication for ShotDeck.
+"""Active Directory authentication for Flow.
 
     from auth import authenticate
     result = authenticate(prompt=login_dialog.prompt)

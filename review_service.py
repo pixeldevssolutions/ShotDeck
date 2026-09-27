@@ -6,7 +6,7 @@ status says a supervisor wants something changed. No event type is invented,
 and nothing is stored in ShotGrid that was not already there.
 
 The one thing kept locally is which items have been looked at, because
-ShotGrid has no per-user read flag ShotDeck may write to. It is a small JSON
+ShotGrid has no per-user read flag Flow may write to. It is a small JSON
 file of ids and a timestamp -- deliberately not a notification database.
 
 Cost: four queries for the whole inbox, regardless of how many tasks, versions

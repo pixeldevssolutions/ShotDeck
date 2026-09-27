@@ -1,4 +1,4 @@
-# PixelDesk — Custom ShotGrid Desktop 
+# Flow — ShotGrid Desktop clone
 
 Project picker → per-project app launcher → launches DCCs on Rocky Linux with
 project-level environment injected → "My Tasks" tab filtered by the studio's
@@ -37,7 +37,7 @@ Tokens `{PROJECT_NAME}`, `{PROJECT_CODE}`, `{PROJECT_ID}` expand in values.
 A key ending in `+` prepends to the existing var (`PYTHONPATH+`).
 
 `launcher.launch()` runs `linux_path linux_args` via `subprocess.Popen` with the
-merged env and `start_new_session=True` so DCCs survive PixelDesk closing.
+merged env and `start_new_session=True` so DCCs survive Flow closing.
 
 ## Launching through rez
 
@@ -45,7 +45,7 @@ Set `sg_rez_packages` on the Software entity to a rez request, e.g.
 `maya-2024 keentools-6.2`. The app is then started as:
 
 ```
-rez env <sg_rez_packages> shotdeck_context -- <linux_path> <linux_args>
+rez env <sg_rez_packages> flow_context -- <linux_path> <linux_args>
 ```
 
 With rez packages set, `linux_path` may be a bare command name (`maya`) because
@@ -54,7 +54,7 @@ lowercased is used as the command, so a package publishing a `keentools` alias
 needs no path at all. Without rez packages, `linux_path` must be a real absolute
 path — nothing else resolves it.
 
-`shotdeck_context` is appended to every rez request automatically (set
+`flow_context` is appended to every rez request automatically (set
 `REZ_CONTEXT_PACKAGE = ""` in `config.py` to stop that).
 
 ### Building a rez package
@@ -81,8 +81,8 @@ rez release .                 # installs to /software/packages (set in rez confi
 # rename or remove the local ~/packages copy, then re-test rez env
 ```
 
-`rez/shotdeck_context/` in this repository is a working example of that layout —
-build and release it once, and every DCC launched by ShotDeck can import it.
+`rez/flow_context/` in this repository is a working example of that layout —
+build and release it once, and every DCC launched by Flow can import it.
 
 ## Standalone publish
 
@@ -101,7 +101,7 @@ configurable in `config.py` (`VERSION_TASK_FIELD`, `VERSION_ENTITY_FIELD`,
 
 Every API call authenticates as the script user in `SG_SCRIPT_NAME`
 (`SG_daemon`), which is the whole reason artists need no ShotGrid seat. The
-Version's `user` field still credits the artist ShotDeck resolved from their
+Version's `user` field still credits the artist Flow resolved from their
 email address at startup. Those are two different identities and
 `SGClient.create_version` is where that is enforced — nothing sets `user` to
 the script. The result panel names both, so it is obvious from the Version
@@ -152,7 +152,7 @@ not get to skip the decision. **INFO** is the checklist ticking along.
 
 An extension is not trusted on its own: if ffprobe ran and found no video track
 in a `.mov`, the file is corrupt or misnamed, and that is an error rather than a
-warning. Without ffprobe, ShotDeck says it could not check instead of guessing.
+warning. Without ffprobe, Flow says it could not check instead of guessing.
 
 ### Media path policy
 
@@ -177,7 +177,7 @@ resolved first.
 
 `APPROVED_MEDIA_ROOTS` covers the legitimate exceptions — a shared plate store,
 a vendor drop — and expands `{project}`. Both are environment-settable
-(`SHOTDECK_PATH_POLICY`, `SHOTDECK_APPROVED_MEDIA_ROOTS`).
+(`FLOW_PATH_POLICY`, `FLOW_APPROVED_MEDIA_ROOTS`).
 
 Two things are refused under **every** policy, because they are not preferences:
 media belonging to a **different show**, and media that fails the media checks.
@@ -281,7 +281,7 @@ what the UI draws rather than inventing nesting ShotGrid cannot keep.
 
 Each message shows its author, the author's ShotGrid **permission rule set**
 (Artist, Manager, Client — ShotGrid's own idea of who they are, not a role
-ShotDeck made up), the time, and the text. Edit and Delete appear only on your
+Flow made up), the time, and the text. Edit and Delete appear only on your
 own messages; ShotGrid's permissions are still the real gate, this just keeps
 buttons that are certain to fail off the screen.
 
@@ -360,8 +360,8 @@ demand and on Refresh — never polled. Clicking an item opens the version it is
 about, selected in the browser, with its notes; you never go looking for it.
 
 Read state is a small JSON file of item ids and timestamps
-(`~/.shotdeck/review_read.json`, `SHOTDECK_REVIEW_STATE`) — ShotGrid has no
-per-user read flag ShotDeck may write, and this is deliberately not a
+(`~/.flow/review_read.json`, `FLOW_REVIEW_STATE`) — ShotGrid has no
+per-user read flag Flow may write, and this is deliberately not a
 notification database. Nothing from ShotGrid is copied into it.
 
 The same review data puts a dot on the task row next to its latest version, and
@@ -382,10 +382,10 @@ over ssh.
 
 ## Publish context inside the DCC
 
-Every launch writes a JSON context file and exports `SHOTDECK_CONTEXT_FILE`
-pointing at it, plus flat `SHOTDECK_*` variables (`SHOTDECK_TASK_ID`,
-`SHOTDECK_ENTITY_TYPE`, `SHOTDECK_ENTITY_ID`, `SHOTDECK_STEP`,
-`SHOTDECK_PROJECT_ID`, …) for shell scripts and rez `commands()` blocks.
+Every launch writes a JSON context file and exports `FLOW_CONTEXT_FILE`
+pointing at it, plus flat `FLOW_*` variables (`FLOW_TASK_ID`,
+`FLOW_ENTITY_TYPE`, `FLOW_ENTITY_ID`, `FLOW_STEP`,
+`FLOW_PROJECT_ID`, …) for shell scripts and rez `commands()` blocks.
 
 The task comes from the row selected in the **My Tasks** tab; the bar under the
 tabs shows which task an app will launch against. Launching with nothing
@@ -394,14 +394,14 @@ selected is allowed — the context is written with `task: null`.
 In-DCC tools should use the package rather than reading the variables:
 
 ```python
-import shotdeck_context
+import flow_context
 
-ctx = shotdeck_context.get()
+ctx = flow_context.get()
 if ctx.has_task:
     publish(task=ctx.task_id, entity=(ctx.entity_type, ctx.entity_id))
 else:
-    warn("Launched without a task — pick one in ShotDeck and relaunch.")
+    warn("Launched without a task — pick one in Flow and relaunch.")
 ```
 
-`get()` never raises: outside a ShotDeck launch it returns an empty `Context`
+`get()` never raises: outside a Flow launch it returns an empty `Context`
 that is falsey, so tools degrade instead of tracebacking at an artist.

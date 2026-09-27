@@ -57,7 +57,7 @@ class MessageCard(QFrame):
 
         role = message.author_role
         if role:
-            # ShotGrid's own permission rule set, not a role ShotDeck invented.
+            # ShotGrid's own permission rule set, not a role Flow invented.
             chip = QLabel(role.upper())
             chip.setObjectName("roleChip")
             head.addWidget(chip)
@@ -179,7 +179,7 @@ class NotesPanel(QWidget):
         self.set_version(None)
 
         # Notes are re-read on demand only. No polling: a client note is not
-        # worth a query every few seconds from every open ShotDeck.
+        # worth a query every few seconds from every open Flow.
         self._cooldown = QTimer(self)
         self._cooldown.setSingleShot(True)
         self._cooldown.setInterval(config.NOTES_MIN_REFRESH_SECONDS * 1000)

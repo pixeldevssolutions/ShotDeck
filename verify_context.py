@@ -28,23 +28,23 @@ import rez_scan
 
 # What a launched app must have to be able to publish.
 REQUIRED = [
-    "SHOTDECK_CONTEXT_FILE",
-    "SHOTDECK_SITE",
-    "SHOTDECK_USER_EMAIL",
-    "SHOTDECK_PROJECT_ID",
-    "SHOTDECK_TASK_ID",
-    "SHOTDECK_ENTITY_TYPE",
-    "SHOTDECK_ENTITY_ID",
+    "FLOW_CONTEXT_FILE",
+    "FLOW_SITE",
+    "FLOW_USER_EMAIL",
+    "FLOW_PROJECT_ID",
+    "FLOW_TASK_ID",
+    "FLOW_ENTITY_TYPE",
+    "FLOW_ENTITY_ID",
 ]
 # Nice to have, but a launch without a task legitimately leaves these empty.
 OPTIONAL = [
-    "SHOTDECK_PROJECT_CODE",
-    "SHOTDECK_PROJECT_NAME",
-    "SHOTDECK_TASK_NAME",
-    "SHOTDECK_STEP",
-    "SHOTDECK_ENTITY_NAME",
-    "SHOTDECK_SOFTWARE",
-    "SHOTDECK_SOFTWARE_VERSION",
+    "FLOW_PROJECT_CODE",
+    "FLOW_PROJECT_NAME",
+    "FLOW_TASK_NAME",
+    "FLOW_STEP",
+    "FLOW_ENTITY_NAME",
+    "FLOW_SOFTWARE",
+    "FLOW_SOFTWARE_VERSION",
 ]
 
 
@@ -197,8 +197,8 @@ def report(env):
         ok = bool(value)
         # An app launched with no task selected has these set but empty, which
         # is legitimate -- flag it as a warning rather than a failure.
-        if key in ("SHOTDECK_TASK_ID", "SHOTDECK_ENTITY_TYPE",
-                   "SHOTDECK_ENTITY_ID") and key in env and not value:
+        if key in ("FLOW_TASK_ID", "FLOW_ENTITY_TYPE",
+                   "FLOW_ENTITY_ID") and key in env and not value:
             print(f"  ~ {key:<28} (empty — launched without a task)")
             continue
         print(f"  {'OK' if ok else 'MISSING':<2} {key:<28} {value or ''}")
@@ -219,10 +219,10 @@ def report(env):
 
     # The context file is the thing publish tools actually read.
     print("\nContext file")
-    path = env.get("SHOTDECK_CONTEXT_FILE")
+    path = env.get("FLOW_CONTEXT_FILE")
     if not path:
-        print("   MISSING  SHOTDECK_CONTEXT_FILE was not set")
-        failures.append("SHOTDECK_CONTEXT_FILE")
+        print("   MISSING  FLOW_CONTEXT_FILE was not set")
+        failures.append("FLOW_CONTEXT_FILE")
     elif not os.path.isfile(path):
         print(f"   MISSING  {path} does not exist")
         failures.append("context file")
@@ -242,12 +242,12 @@ def report(env):
             print(f"   BAD  {path}: {e}")
             failures.append("context file")
 
-    print("\nshotdeck_context package")
+    print("\nflow_context package")
     if rez_scan.is_available(config.REZ_CONTEXT_PACKAGE):
         print("   OK  released — in-DCC tools can import it")
     else:
-        print("   ~   not built yet, so tools must read the SHOTDECK_* vars")
-        print("       build with: cd rez/shotdeck_context && rez build -ic")
+        print("   ~   not built yet, so tools must read the FLOW_* vars")
+        print("       build with: cd rez/flow_context && rez build -ic")
 
     print()
     if failures:

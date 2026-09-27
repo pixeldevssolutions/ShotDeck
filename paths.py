@@ -63,7 +63,7 @@ def folders(project, task):
         if "{step}" in rel and not step:
             continue
         # Always POSIX separators -- these live on the Linux farm even when
-        # ShotDeck is being developed on Windows.
+        # Flow is being developed on Windows.
         path = root.rstrip("/") + "/" + rel.format(step=step)
         out.append((label.format(step=step or "step"), path, os.path.isdir(path)))
     return out
@@ -73,7 +73,7 @@ def open_url(url):
     """Open a ShotGrid page in the desktop browser.
 
     Same opener as the folders, because xdg-open is the desktop's own idea of
-    what a URL should do -- ShotDeck does not need its own browser handling.
+    what a URL should do -- Flow does not need its own browser handling.
     """
     opener = config.FILE_MANAGER
     if opener and shutil.which(opener.split()[0]) is None:

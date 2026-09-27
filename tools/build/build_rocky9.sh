@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Build the standalone ShotDeck binary. Run this ON ROCKY 9 -- PyInstaller does
+# Build the standalone Flow binary. Run this ON ROCKY 9 -- PyInstaller does
 # not cross-compile, so a Windows build produces a Windows exe and nothing else.
 #
-#   cd /software/pipeline/ShotDeck && ./tools/build/build_rocky9.sh
-#   SHOTDECK_BUILD_PYTHON=/opt/python3.11/bin/python3 ./tools/build/build_rocky9.sh
+#   cd /software/pipeline/Flow && ./tools/build/build_rocky9.sh
+#   FLOW_BUILD_PYTHON=/opt/python3.11/bin/python3 ./tools/build/build_rocky9.sh
 #
 # Output:
-#   dist/ShotDeck/ShotDeck          the binary
-#   dist/ShotDeck-<ver>-el9.tar.gz  the same folder, ready to copy to a farm box
+#   dist/Flow/Flow          the binary
+#   dist/Flow-<ver>-el9.tar.gz  the same folder, ready to copy to a farm box
 #
 # The build venv lives in build/venv and is reused; delete it to start clean.
 # Qt needs these on the build box and on every box that runs the result:
@@ -26,9 +26,9 @@ cd "$APP_ROOT"
 [ -f main.py ] || { echo "build: no application at $APP_ROOT/main.py" >&2; exit 1; }
 
 # 3.11 first: PySide6 wheels for it are current, and Rocky 9's stock 3.9 is not.
-PYTHON="${SHOTDECK_BUILD_PYTHON:-$(command -v python3.11 || command -v python3.12 || command -v python3)}"
+PYTHON="${FLOW_BUILD_PYTHON:-$(command -v python3.11 || command -v python3.12 || command -v python3)}"
 [ -n "$PYTHON" ] && [ -x "$PYTHON" ] || {
-    echo "build: no Python found -- dnf install python3.11, or set SHOTDECK_BUILD_PYTHON." >&2
+    echo "build: no Python found -- dnf install python3.11, or set FLOW_BUILD_PYTHON." >&2
     exit 1
 }
 echo "python : $PYTHON ($("$PYTHON" -V))"
@@ -44,9 +44,9 @@ fi
 # --clean, so a stale Analysis cache never silently ships an old module.
 "$VENV/bin/python" -m PyInstaller --clean --noconfirm \
     --distpath dist --workpath build/pyinstaller \
-    tools/build/shotdeck.spec
+    tools/build/flow.spec
 
-BIN="$APP_ROOT/dist/ShotDeck/ShotDeck"
+BIN="$APP_ROOT/dist/Flow/Flow"
 [ -x "$BIN" ] || { echo "build: PyInstaller reported success but $BIN is missing." >&2; exit 1; }
 
 # Smoke test: argparse exits before QApplication, so this proves the bundle
@@ -54,12 +54,12 @@ BIN="$APP_ROOT/dist/ShotDeck/ShotDeck"
 "$BIN" --help >/dev/null || { echo "build: $BIN cannot start -- see the traceback above." >&2; exit 1; }
 
 VERSION="$(git -C "$APP_ROOT" describe --tags --always --dirty 2>/dev/null || date +%Y%m%d)"
-TARBALL="$APP_ROOT/dist/ShotDeck-${VERSION}-el9.tar.gz"
-tar -czf "$TARBALL" -C "$APP_ROOT/dist" ShotDeck
+TARBALL="$APP_ROOT/dist/Flow-${VERSION}-el9.tar.gz"
+tar -czf "$TARBALL" -C "$APP_ROOT/dist" Flow
 
 echo
 echo "binary  : $BIN"
 echo "tarball : $TARBALL"
 echo
-echo "Deploy: untar under /software/pipeline, then run ShotDeck/ShotDeck."
+echo "Deploy: untar under /software/pipeline, then run Flow/Flow."
 echo "Credentials still come from /etc/sgdesk/sgdesk.env (DEPLOY-ROCKY9 §5)."

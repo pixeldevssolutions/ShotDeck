@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 import applog
 import config
 import paths
+import rv_player
 import version_query
 from . import jobs, theme
 from .notes_panel import NotesPanel, ActivityPanel
@@ -294,6 +295,14 @@ class VersionBrowser(QDialog):
         self.play_btn.clicked.connect(self._play)
         self.play_btn.hide()
         actions.addWidget(self.play_btn)
+
+        # RV is the review player; the inline Play above stays for a quick look
+        # without leaving the browser.
+        self.rv_btn = QPushButton("Open in RV")
+        self.rv_btn.setObjectName("consoleBtn")
+        self.rv_btn.clicked.connect(lambda: self._open_in_rv([self._selected()]))
+        self.rv_btn.hide()
+        actions.addWidget(self.rv_btn)
 
         self.compare_btn = QPushButton("Compare…")
         self.compare_btn.setObjectName("consoleBtn")
@@ -573,6 +582,9 @@ class VersionBrowser(QDialog):
         local = version.get("sg_path_to_movie") or ""
         self.play_btn.setVisible(
             bool(HAVE_MULTIMEDIA and local and os.path.isfile(local)))
+        # RV also plays frame sequences, so it is offered on versions the
+        # inline player has nothing to show for.
+        self.rv_btn.setVisible(rv_player.playable(version))
 
         url = (version.get("image") or "")
         if not url:
@@ -690,6 +702,19 @@ class VersionBrowser(QDialog):
         pick.triggered.connect(lambda _=False, v=version: self._pick_compare(v))
         pick.setEnabled(len(self._versions) > 1)
         sub.addAction(pick)
+
+        # The same two comparisons in RV, which wipes at full resolution and in
+        # the right colour space -- what a supervisor signs off on.
+        sub.addSeparator()
+        for label, other in (("previous", previous), ("latest", latest)):
+            act = QAction(f"With {label} in RV (wipe)", sub)
+            act.setEnabled(bool(other) and other["id"] != version["id"] and
+                           rv_player.playable(version) and
+                           rv_player.playable(other))
+            act.triggered.connect(
+                lambda _=False, a=version, b=other:
+                self._open_in_rv([a, b], mode="wipe"))
+            sub.addAction(act)
         return sub
 
     def _previous_version(self, version):
@@ -709,6 +734,11 @@ class VersionBrowser(QDialog):
 
     def _compare(self, version_a, version_b):
         if not version_a or not version_b:
+            return
+        # RV's wipe is the compare a supervisor signs off on; the dialog stays
+        # the fallback for versions whose media this machine cannot read.
+        if rv_player.playable(version_a) and rv_player.playable(version_b):
+            self._open_in_rv([version_a, version_b], mode="wipe")
             return
         VersionCompare(self.sg, self.project, version_a, version_b,
                        versions=self._versions, parent=self).exec()
@@ -737,6 +767,13 @@ class VersionBrowser(QDialog):
         open_act = QAction("Open in ShotGrid", menu)
         open_act.triggered.connect(self._open_in_shotgrid)
         menu.addAction(open_act)
+
+        rv_act = QAction("Open in RV", menu)
+        rv_act.setEnabled(rv_player.playable(version))
+        rv_act.triggered.connect(
+            lambda _=False, v=version: self._open_in_rv([v]))
+        menu.addAction(rv_act)
+
         self._add_compare_actions(menu, version)
 
         publish = QAction("Publish New Version…", menu)
@@ -758,6 +795,25 @@ class VersionBrowser(QDialog):
             QApplication.clipboard().setText(n))
         menu.addAction(copy_name)
         menu.exec(self.table.viewport().mapToGlobal(pos))
+
+    def _open_in_rv(self, versions, mode=""):
+        """Hand these versions to RV. One opens, two compare in `mode`.
+
+        The inline player keeps running otherwise, and two players fighting over
+        the same audio device is a support call, so it is stopped first.
+        """
+        versions = [v for v in versions if v]
+        if not versions:
+            return
+        self._stop_player()
+        try:
+            pid, log_path = rv_player.open_versions(
+                versions, mode=mode, project=self.project)
+        except Exception as e:
+            log.error("could not open RV: %s", e)
+            QMessageBox.warning(self, "Open in RV", str(e))
+            return
+        log.info("RV pid %s, log %s", pid, log_path)
 
     def _open_in_shotgrid(self):
         version = self._selected()

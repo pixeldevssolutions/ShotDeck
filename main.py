@@ -12,7 +12,7 @@ from ui.main_window import MainWindow
 
 
 def main():
-    parser = argparse.ArgumentParser(description="ShotDeck")
+    parser = argparse.ArgumentParser(description="Flow")
     parser.add_argument("-v", "--verbose", action="store_true",
                         help="log every command and environment detail")
     parser.add_argument("--console", action="store_true",
@@ -20,11 +20,11 @@ def main():
     args = parser.parse_args()
 
     log = applog.setup(verbose=args.verbose)
-    log.info("ShotDeck starting")
+    log.info("Flow starting")
 
     app = QApplication(sys.argv)
 
-    # Up before anything else, so launching ShotDeck shows ShotDeck rather
+    # Up before anything else, so launching Flow shows Flow rather
     # than a bare desktop while AD and ShotGrid are contacted.
     splash = Splash("Loading Pipeline")
     splash.show()
@@ -46,9 +46,9 @@ def main():
     if not result.authorized:
         log.error("authentication failed: %s", result.reason)
         splash.close()
-        QMessageBox.critical(None, "ShotDeck",
+        QMessageBox.critical(None, "Flow",
                              result.reason or "You are not authorized to use "
-                                              "ShotDeck.")
+                                              "Flow.")
         return 1
     log.info("signed in as %s (%s)", result.login, result.method)
     splash.set_message("Connecting to ShotGrid")
@@ -60,7 +60,7 @@ def main():
         # a terminal the artist never sees.
         log.error("could not connect to ShotGrid: %s", e)
         splash.close()
-        QMessageBox.critical(None, "ShotDeck", str(e))
+        QMessageBox.critical(None, "Flow", str(e))
         return 1
 
     splash.set_message("Preparing Workspace")

@@ -140,7 +140,7 @@ def _media(report, path):
     if not kind:
         ext = os.path.splitext(path)[1] or "(no extension)"
         report.add("Media", ERROR, "unsupported",
-                   f"{ext} is not a media format ShotDeck publishes.\n\n"
+                   f"{ext} is not a media format Flow publishes.\n\n"
                    f"Movies: {', '.join(sorted(config.MOVIE_EXTENSIONS))}\n"
                    f"Images: {', '.join(sorted(config.IMAGE_EXTENSIONS))}")
         return None
@@ -166,7 +166,7 @@ def _media_contents(report, info):
         if info.error:
             report.add("Media", WARNING, "uninspectable",
                        f"The media could not be inspected "
-                       f"({info.error}). ShotDeck cannot confirm it is "
+                       f"({info.error}). Flow cannot confirm it is "
                        f"playable before uploading it.")
         else:
             report.add("Media", INFO, "no_inspector",

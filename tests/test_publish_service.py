@@ -7,7 +7,7 @@ import config
 import fakes
 import publish_service as ps
 
-TMP = tempfile.mkdtemp(prefix="shotdeck-tests-")
+TMP = tempfile.mkdtemp(prefix="flow-tests-")
 
 
 def _file(name, size=2048):

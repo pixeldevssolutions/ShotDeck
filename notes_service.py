@@ -37,7 +37,7 @@ class Message:
 
     @property
     def author_role(self):
-        """Whatever ShotGrid calls this person, not a role ShotDeck made up."""
+        """Whatever ShotGrid calls this person, not a role Flow made up."""
         rule = self.author.get("permission_rule_set")
         if isinstance(rule, dict):
             return rule.get("name") or ""

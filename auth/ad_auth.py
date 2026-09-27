@@ -1,4 +1,4 @@
-"""Active Directory authentication for ShotDeck.
+"""Active Directory authentication for Flow.
 
 Produces the validated login the rest of the app runs as:
 
