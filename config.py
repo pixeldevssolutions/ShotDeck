@@ -47,6 +47,15 @@ TASK_FIELDS = [
     "entity.Asset.sg_asset_type",
 ]
 
+# Task statuses that mean the work is finished. The home page lists every
+# other task assigned to the artist. Short codes -- check them against the
+# site's own Task status list.
+TASK_DONE_STATUSES = [
+    s for s in os.environ.get(
+        "FLOW_TASK_DONE_STATUSES", "fin,cmpt,apr,omt,na").split(",")
+    if s.strip()
+]
+
 # Where a task's files live. Tokens: {project} (tank_name), {project_name},
 # {sequence}, {shot}, {asset}, {asset_type}, {entity}, {step}.
 ENTITY_PATH_TEMPLATES = {

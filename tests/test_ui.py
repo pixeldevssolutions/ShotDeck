@@ -941,6 +941,70 @@ def test_a_selected_task_survives_the_late_arriving_columns():
     assert table._selected_task_id() == chosen
 
 
+# -- open tasks on the home page -------------------------------------------
+
+def _with_finished_work():
+    sg = _searchable()
+    done = fakes.add_task(sg, "Roto", entity_name="AD1040")
+    done["sg_status_list"] = "fin"
+    return sg
+
+
+def test_open_tasks_come_from_every_project_and_skip_finished_work():
+    tasks = fakes.client(_with_finished_work()).open_tasks()
+    assert {t["project"]["name"] for t in tasks} == {"UAT6", "SHOW002"}
+    assert "Roto" not in [t["content"] for t in tasks]
+
+
+def test_the_done_statuses_are_filtered_by_shotgrid_not_locally():
+    c = fakes.client(_with_finished_work())
+    c.open_tasks()
+    filters = [call[2] for call in c.sg.calls if call[1] == "Task"][-1]
+    assert ["sg_status_list", "not_in", config.TASK_DONE_STATUSES] in filters
+
+
+def test_home_filters_combine():
+    import datetime
+    from ui.home_tasks import filter_tasks
+
+    today = datetime.date(2026, 9, 27)
+    tasks = [
+        dict(fakes.TASK, id=1, content="Comp", due_date="2026-09-20"),
+        dict(fakes.TASK, id=2, content="Comp", due_date="2026-10-01",
+             project=OTHER_PROJECT),
+        dict(fakes.TASK, id=3, content="Light", due_date=None,
+             sg_status_list="rdy"),
+    ]
+    ids = lambda **kw: [t["id"] for t in filter_tasks(tasks, today=today, **kw)]
+    assert ids(due="overdue") == [1]
+    assert ids(due="week") == [1, 2]
+    assert ids(due="none") == [3]
+    assert ids(project_id=OTHER_PROJECT["id"]) == [2]
+    assert ids(status="rdy") == [3]
+    assert ids(text="show002 comp") == [2]
+    assert ids(text="comp", project_id=fakes.PROJECT["id"]) == [1, 3]  # step
+    assert ids(text="light", due="none") == [3]
+
+
+def test_home_shows_open_tasks_and_opens_one_on_double_click():
+    sg = _with_finished_work()
+    win = MainWindowFor(sg)
+    home = win.home_tasks
+    assert win.stack.currentWidget() is win.home
+    assert home.table.rowCount() == 3, "the finished Roto task must not show"
+    assert home.project_box.count() == 3     # All + two projects
+
+    home.project_box.setCurrentIndex(home.project_box.findData(
+        OTHER_PROJECT["id"]))
+    assert home.table.rowCount() == 1
+    assert home.count.text() == "1 of 3"
+
+    home._open_row(0)
+    settle()
+    assert win.project["id"] == OTHER_PROJECT["id"]
+    assert win.task and win.task["id"] == home._rows[0]["id"]
+
+
 def MainWindowFor(sg):
     from ui.main_window import MainWindow
 

@@ -248,6 +248,9 @@ def _matches(version, filters):
                     return False
             elif actual not in wanted:
                 return False
+        elif op == "not_in":
+            if actual in (value if isinstance(value, list) else [value]):
+                return False
         elif op == "contains":
             haystack = actual if isinstance(actual, str) else \
                 (actual or {}).get("name", "") if isinstance(actual, dict) \
