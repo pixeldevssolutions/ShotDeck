@@ -115,6 +115,30 @@ QMainWindow, QWidget {{
     color: {ACCENT}; border-color: {ACCENT_SUNK}; background: rgba(61,157,255,0.10);
 }}
 
+/* ---- home page ---- */
+#chip {{
+    background: transparent; border: 1px solid {BORDER}; border-radius: 12px;
+    color: {TEXT_DIM}; padding: 4px 12px; font-size: 12px;
+}}
+#chip:hover {{ border-color: {BORDER_HI}; color: {TEXT}; }}
+#chip:checked {{
+    color: {ACCENT}; border-color: {ACCENT_SUNK}; background: rgba(61,157,255,0.10);
+}}
+#launchBtn {{
+    background: {SURFACE_HI}; border: 1px solid {BORDER};
+    border-radius: {RADIUS_SM}px; color: {TEXT}; font-size: 12px;
+    padding: 3px 10px; margin: 4px 0;
+}}
+#launchBtn[split="true"] {{ padding-right: 22px; }}
+#launchBtn:hover {{ border-color: {ACCENT_SUNK}; }}
+#launchBtn::menu-indicator {{ image: none; width: 0; }}
+#launchBtn::menu-button {{ border-left: 1px solid {BORDER}; width: 18px; }}
+#sectionToggle {{
+    background: transparent; border: none; color: {TEXT};
+    font-size: 16px; font-weight: 600; padding: 0;
+}}
+#sectionToggle:hover {{ color: {ACCENT_HI}; }}
+
 /* ---- tiles ---- */
 #tile {{
     background: {SURFACE}; border: 1px solid {BORDER}; border-radius: {RADIUS}px;

@@ -1,10 +1,14 @@
 """The artist's open tasks, on the home page, across every project.
 
 The first question an artist has when Flow opens is "what am I working on".
-This answers it without picking a project first. Double-clicking a task opens
-its project and lands on the task, the same place the header search goes.
-Right-click gives the same task menu as the project page (TaskMenu), acting on
-the task's own project, so there is no second copy of those actions.
+This answers it without picking a project first:
+
+- every row has a launch button that opens the app last used on that task
+  (its dropdown lists every DCC, the same entries as the right-click menu);
+- double-click opens the task in its project, the same place the header search
+  goes; right-click gives the project page's task menu (TaskMenu), acting on
+  the task's own project, so there is no second copy of those actions;
+- one row of chips filters by due date or status, with live counts.
 
 "Open" means any status not in config.TASK_DONE_STATUSES. That filter runs on
 the server, so finished work never crosses the wire. The filters on this page
@@ -13,81 +17,79 @@ run in memory over the list that came back.
 
 import datetime
 
-import config
-
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
-    QAbstractItemView, QComboBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
-    QPushButton, QStackedWidget, QTableWidget, QTableWidgetItem, QVBoxLayout,
-    QWidget,
+    QAbstractItemView, QButtonGroup, QComboBox, QHBoxLayout, QHeaderView,
+    QLabel, QMenu, QPushButton, QStackedWidget, QTableWidget,
+    QTableWidgetItem, QToolButton, QVBoxLayout, QWidget,
 )
 
-from . import theme
+import config
+from . import theme, ui_state
 from .branding import LoadingPage
 from .software_page import TaskMenu
 from .widgets import DueDate, EmptyState, StatusPill
 
-ALL = ""
+ALL = "all"
+OVERDUE = "overdue"
+WEEK = "week"
+STATUS = "status:"          # prefix: "status:ip" keeps only that status
 
-# (key, label) for the due filter.
-DUE_CHOICES = [
-    (ALL, "Any due date"),
-    ("overdue", "Overdue"),
-    ("week", "Due within 7 days"),
-    ("none", "No due date"),
-]
+WEEK_DAYS = 7
 
 
-def _due_matches(task, due, today):
-    raw = task.get("due_date") or ""
-    if due == "none":
-        return not raw
-    if not raw:
-        return False
+def _due(task):
     try:
-        date = datetime.date.fromisoformat(raw)
+        return datetime.date.fromisoformat(task.get("due_date") or "")
     except ValueError:
-        return False
-    if due == "overdue":
-        return date < today
-    if due == "week":
-        return date <= today + datetime.timedelta(days=7)
+        return None
+
+
+def chip_matches(task, chip, today):
+    if chip == OVERDUE:
+        due = _due(task)
+        return due is not None and due < today
+    if chip == WEEK:
+        due = _due(task)
+        return due is not None and \
+            today <= due <= today + datetime.timedelta(days=WEEK_DAYS)
+    if chip.startswith(STATUS):
+        return task.get("sg_status_list") == chip[len(STATUS):]
     return True
 
 
-def filter_tasks(tasks, text="", project_id=None, step=ALL, status=ALL,
-                 due=ALL, today=None):
-    """The tasks that pass every filter. Words in `text` may come in any order."""
+def filter_tasks(tasks, project_id=None, chip=ALL, today=None):
+    """The tasks in this project (None: every project) that pass the chip."""
     today = today or datetime.date.today()
-    words = text.lower().split()
-    out = []
-    for t in tasks:
-        if project_id is not None and \
-                (t.get("project") or {}).get("id") != project_id:
-            continue
-        if step and (t.get("step") or {}).get("name") != step:
-            continue
-        if status and t.get("sg_status_list") != status:
-            continue
-        if due and not _due_matches(t, due, today):
-            continue
-        if words:
-            hay = " ".join(str(v) for v in (
-                t.get("content"), (t.get("entity") or {}).get("name"),
-                (t.get("project") or {}).get("name"),
-                (t.get("step") or {}).get("name"),
-                t.get("sg_status_list"))).lower()
-            if not all(w in hay for w in words):
-                continue
-        out.append(t)
-    return out
+    return [t for t in tasks
+            if (project_id is None or
+                (t.get("project") or {}).get("id") == project_id)
+            and chip_matches(t, chip, today)]
+
+
+def due_label(task, today=None):
+    """"2 days late", "Today", "Tomorrow", "Thu 2 Oct" -- or "" with no date."""
+    due = _due(task)
+    if due is None:
+        return ""
+    today = today or datetime.date.today()
+    days = (due - today).days
+    if days < 0:
+        return f"{-days} day{'s' if days != -1 else ''} late"
+    if days == 0:
+        return "Today"
+    if days == 1:
+        return "Tomorrow"
+    text = f"{due:%a} {due.day} {due:%b}"
+    return text if due.year == today.year else f"{text} {due.year}"
 
 
 class HomeTasks(TaskMenu, QWidget):
-    COLS = ["Task", "Link", "Project", "Step", "Status", "Due"]
+    COLS = ["Task", "Shot / Asset", "Project", "Step", "Status", "Due", ""]
     COL_STATUS = 4
     COL_DUE = 5
+    COL_LAUNCH = 6
 
     task_opened = Signal(object)          # the Task dict
     refresh_requested = Signal()
@@ -105,6 +107,9 @@ class HomeTasks(TaskMenu, QWidget):
         self._rows = []
         self._status_labels = {}
         self._loading = False
+        self._chip = ALL
+        self._sort = (self.COL_DUE, Qt.AscendingOrder)
+        self._last_launch = ui_state.get("last_launch", {})
         self._projects = {}          # id -> full Project dict, for folders
         self._statuses = []          # [(code, label), ...] for TaskMenu
         self._latest = {}            # task id -> newest Version
@@ -119,10 +124,10 @@ class HomeTasks(TaskMenu, QWidget):
         heading = QLabel("My Open Tasks")
         heading.setObjectName("headerTitle")
         top.addWidget(heading)
-        self.count = QLabel("")
-        self.count.setObjectName("tileSub")
-        top.addWidget(self.count)
         top.addStretch()
+        self.project_box = QComboBox()
+        self.project_box.setMinimumWidth(150)
+        top.addWidget(self.project_box)
         self.refresh_btn = QPushButton("Refresh")
         self.refresh_btn.setObjectName("termBtn")
         self.refresh_btn.setCursor(Qt.PointingHandCursor)
@@ -130,25 +135,20 @@ class HomeTasks(TaskMenu, QWidget):
         top.addWidget(self.refresh_btn)
         lay.addLayout(top)
 
-        filters = QHBoxLayout()
-        filters.setSpacing(8)
-        self.search = QLineEdit()
-        self.search.setPlaceholderText("Filter tasks")
-        self.search.setClearButtonEnabled(True)
-        self.search.setFixedWidth(220)
-        self.search.textChanged.connect(self._rebuild)
-        filters.addWidget(self.search)
-        self.project_box = self._combo(filters)
-        self.step_box = self._combo(filters)
-        self.status_box = self._combo(filters)
-        self.due_box = self._combo(filters)
-        for key, label in DUE_CHOICES:
-            self.due_box.addItem(label, key)
-        filters.addStretch()
-        hint = QLabel("Double-click to open a task, right-click for actions")
+        chips = QHBoxLayout()
+        chips.setSpacing(6)
+        self.chip_group = QButtonGroup(self)
+        self.chip_group.setExclusive(True)
+        self._chip_buttons = {}          # key -> button
+        self._chip_row = chips
+        for key in (ALL, OVERDUE, WEEK):
+            self._add_chip(key)
+        self._status_chip_at = chips.count()
+        chips.addStretch()
+        hint = QLabel("Double-click to open · right-click for more")
         hint.setObjectName("tileSub")
-        filters.addWidget(hint)
-        lay.addLayout(filters)
+        chips.addWidget(hint)
+        lay.addLayout(chips)
 
         self.stack = QStackedWidget()
         lay.addWidget(self.stack)
@@ -159,13 +159,16 @@ class HomeTasks(TaskMenu, QWidget):
         header.setSectionResizeMode(0, QHeaderView.Stretch)
         for c in (1, 2, 3):
             header.setSectionResizeMode(c, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(self.COL_STATUS, QHeaderView.Fixed)
-        header.setSectionResizeMode(self.COL_DUE, QHeaderView.Fixed)
-        header.resizeSection(self.COL_STATUS, 110)
-        header.resizeSection(self.COL_DUE, 110)
+        for c, width in ((self.COL_STATUS, 150), (self.COL_DUE, 110),
+                         (self.COL_LAUNCH, 150)):
+            header.setSectionResizeMode(c, QHeaderView.Fixed)
+            header.resizeSection(c, width)
         header.setHighlightSections(False)
+        header.setSortIndicatorShown(True)
+        header.setSortIndicator(*self._sort)
+        header.sectionClicked.connect(self._on_header_clicked)
         self.table.verticalHeader().hide()
-        self.table.verticalHeader().setDefaultSectionSize(34)
+        self.table.verticalHeader().setDefaultSectionSize(38)
         self.table.setShowGrid(False)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -181,26 +184,95 @@ class HomeTasks(TaskMenu, QWidget):
         self.table.customContextMenuRequested.connect(self._on_context_menu)
         self.stack.addWidget(self.table)
 
-        self.empty = EmptyState(
-            "✓", "No open tasks",
-            "Nothing assigned to you is still in progress, or the filters "
-            "hide it.")
-        self.stack.addWidget(self.empty)
+        self.caught_up = EmptyState(
+            "✓", "Nothing open — you're all caught up",
+            "Tasks assigned to you that aren't finished show up here.")
+        self.stack.addWidget(self.caught_up)
+
+        self.filtered_empty = QWidget()
+        fe = QVBoxLayout(self.filtered_empty)
+        fe.setAlignment(Qt.AlignCenter)
+        fe.setSpacing(10)
+        self.filtered_title = QLabel("")
+        self.filtered_title.setObjectName("emptyTitle")
+        self.filtered_title.setAlignment(Qt.AlignCenter)
+        fe.addWidget(self.filtered_title)
+        clear = QPushButton("Clear filters")
+        clear.setObjectName("termBtn")
+        clear.setCursor(Qt.PointingHandCursor)
+        clear.clicked.connect(self.clear_filters)
+        fe.addWidget(clear, 0, Qt.AlignCenter)
+        self.stack.addWidget(self.filtered_empty)
 
         self.loading = LoadingPage("Loading your tasks...")
         self.stack.addWidget(self.loading)
 
-        # Connected last: filling the due choices above would otherwise
-        # rebuild a table that does not exist yet.
-        for box in (self.project_box, self.step_box, self.status_box,
-                    self.due_box):
-            box.currentIndexChanged.connect(self._rebuild)
+        # Connected last, so filling the box never rebuilds a missing table.
+        self.project_box.currentIndexChanged.connect(self._rebuild)
 
-    def _combo(self, row):
-        box = QComboBox()
-        box.setMinimumWidth(130)
-        row.addWidget(box)
-        return box
+    # -- chips ----------------------------------------------------------------
+
+    def _add_chip(self, key, at=None):
+        btn = QPushButton()
+        btn.setObjectName("chip")
+        btn.setCheckable(True)
+        btn.setCursor(Qt.PointingHandCursor)
+        btn.clicked.connect(lambda _=False, k=key: self._set_chip(k))
+        self.chip_group.addButton(btn)
+        if at is None:
+            self._chip_row.addWidget(btn)
+        else:
+            self._chip_row.insertWidget(at, btn)
+        self._chip_buttons[key] = btn
+        return btn
+
+    def _chip_label(self, key):
+        if key == ALL:
+            return "All"
+        if key == OVERDUE:
+            return "Overdue"
+        if key == WEEK:
+            return "Due this week"
+        code = key[len(STATUS):]
+        return self._status_labels.get(code, code)
+
+    def _refresh_chips(self, in_project):
+        """One chip per status the artist has, and live counts on all of them."""
+        counts = {}
+        for t in in_project:
+            code = t.get("sg_status_list")
+            if code:
+                counts[code] = counts.get(code, 0) + 1
+        wanted = [STATUS + c for c in
+                  sorted(counts, key=lambda c: (-counts[c],
+                                                self._chip_label(STATUS + c)))]
+
+        for key in [k for k in self._chip_buttons if k.startswith(STATUS)]:
+            if key not in wanted:
+                btn = self._chip_buttons.pop(key)
+                self.chip_group.removeButton(btn)
+                btn.deleteLater()
+        for i, key in enumerate(wanted):
+            btn = self._chip_buttons.get(key) or self._add_chip(key)
+            self._chip_row.removeWidget(btn)
+            self._chip_row.insertWidget(self._status_chip_at + i, btn)
+
+        if self._chip not in self._chip_buttons:
+            self._chip = ALL
+        today = datetime.date.today()
+        for key, btn in self._chip_buttons.items():
+            n = sum(1 for t in in_project if chip_matches(t, key, today))
+            btn.setText(f"{self._chip_label(key)}  {n}")
+            btn.setChecked(key == self._chip)
+
+    def _set_chip(self, key):
+        self._chip = key
+        self._rebuild()
+
+    def clear_filters(self):
+        self._chip = ALL
+        self.project_box.setCurrentIndex(0)     # rebuilds via the signal
+        self._rebuild()
 
     # -- data ---------------------------------------------------------------
 
@@ -212,7 +284,7 @@ class HomeTasks(TaskMenu, QWidget):
     def set_statuses(self, statuses):
         self._statuses = statuses or []
         self._status_labels = dict(self._statuses)
-        self._fill_choices()
+        self._rebuild()
 
     def set_projects(self, projects):
         self._projects = {p["id"]: p for p in projects or []}
@@ -233,79 +305,150 @@ class HomeTasks(TaskMenu, QWidget):
     def set_tasks(self, tasks):
         self._tasks = tasks
         self._loading = False
-        self._fill_choices()
+        self._fill_projects()
         self._rebuild()
 
-    def _fill_choices(self):
-        """Offer only values the artist's own tasks have, and keep the pick."""
-        projects = {}
-        steps, statuses = set(), set()
+    def _fill_projects(self):
+        """Offer only the projects the artist has tasks on, keeping the pick."""
+        names = {}
         for t in self._tasks:
             p = t.get("project") or {}
             if p.get("id") is not None:
-                projects[p["id"]] = p.get("name") or str(p["id"])
-            if (t.get("step") or {}).get("name"):
-                steps.add(t["step"]["name"])
-            if t.get("sg_status_list"):
-                statuses.add(t["sg_status_list"])
+                names[p["id"]] = p.get("name") or str(p["id"])
+        current = self.project_box.currentData()
+        self.project_box.blockSignals(True)
+        self.project_box.clear()
+        self.project_box.addItem("All projects", None)
+        for pid, name in sorted(names.items(), key=lambda x: x[1].lower()):
+            self.project_box.addItem(name, pid)
+        index = self.project_box.findData(current)
+        self.project_box.setCurrentIndex(index if index >= 0 else 0)
+        self.project_box.blockSignals(False)
 
-        self._refill(self.project_box, "All projects",
-                     sorted(((n, i) for i, n in projects.items()),
-                            key=lambda x: x[0].lower()), none=None)
-        self._refill(self.step_box, "All steps",
-                     [(s, s) for s in sorted(steps)])
-        self._refill(self.status_box, "All statuses",
-                     [(self._status_labels.get(c, c), c)
-                      for c in sorted(statuses)])
+    def remember_launch(self, task, package, version):
+        """The app a task was last opened in, for its launch button."""
+        self._last_launch[str(task["id"])] = [package, version]
+        ui_state.put("last_launch", self._last_launch)
+        self._rebuild()
 
-    def _refill(self, box, all_label, choices, none=ALL):
-        current = box.currentData()
-        box.blockSignals(True)
-        box.clear()
-        box.addItem(all_label, none)
-        for label, data in choices:
-            box.addItem(label, data)
-        index = box.findData(current)
-        box.setCurrentIndex(index if index >= 0 else 0)
-        box.blockSignals(False)
+    # -- sorting ------------------------------------------------------------
+
+    def _on_header_clicked(self, col):
+        if col == self.COL_LAUNCH:
+            self.table.horizontalHeader().setSortIndicator(*self._sort)
+            return
+        col_now, order = self._sort
+        if col == col_now:
+            order = Qt.DescendingOrder if order == Qt.AscendingOrder \
+                else Qt.AscendingOrder
+        else:
+            order = Qt.AscendingOrder
+        self._sort = (col, order)
+        self.table.horizontalHeader().setSortIndicator(col, order)
+        self._rebuild()
+
+    def _sort_key(self, task, col):
+        if col == self.COL_DUE:
+            return _due(task)
+        if col == self.COL_STATUS:
+            code = task.get("sg_status_list") or ""
+            return self._status_labels.get(code, code).lower()
+        return str(self._values(task)[col]).lower()
+
+    def _sorted(self, rows):
+        """Sorted on the chosen column; tasks with no due date always last."""
+        col, order = self._sort
+        dated = [t for t in rows if self._sort_key(t, col) is not None]
+        undated = [t for t in rows if self._sort_key(t, col) is None]
+        dated.sort(key=lambda t: self._sort_key(t, col),
+                   reverse=order == Qt.DescendingOrder)
+        return dated + undated
 
     # -- view ---------------------------------------------------------------
 
+    def _values(self, task):
+        return [
+            task.get("content") or "",
+            (task.get("entity") or {}).get("name", ""),
+            (task.get("project") or {}).get("name", ""),
+            (task.get("step") or {}).get("name", ""),
+        ]
+
     def _rebuild(self):
-        self._rows = filter_tasks(
-            self._tasks, self.search.text(),
-            project_id=self.project_box.currentData(),
-            step=self.step_box.currentData() or ALL,
-            status=self.status_box.currentData() or ALL,
-            due=self.due_box.currentData() or ALL)
+        in_project = filter_tasks(self._tasks,
+                                  project_id=self.project_box.currentData())
+        self._refresh_chips(in_project)
+        self._rows = self._sorted(filter_tasks(in_project, chip=self._chip))
 
         self.table.setUpdatesEnabled(False)
         self.table.setRowCount(len(self._rows))
         for r, t in enumerate(self._rows):
-            values = [
-                t.get("content") or "",
-                (t.get("entity") or {}).get("name", ""),
-                (t.get("project") or {}).get("name", ""),
-                (t.get("step") or {}).get("name", ""),
-                t.get("sg_status_list") or "",
-                t.get("due_date") or "",
-            ]
-            for c, v in enumerate(values):
+            for c, v in enumerate(self._values(t)):
                 item = QTableWidgetItem(str(v))
-                item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
                 if c in (2, 3):
                     item.setForeground(QColor(theme.TEXT_DIM))
-                if c == self.COL_STATUS:
-                    item.setToolTip(self._status_labels.get(v, v))
                 self.table.setItem(r, c, item)
+
+            code = t.get("sg_status_list") or ""
+            status = QTableWidgetItem(self._status_labels.get(code, code))
+            status.setData(Qt.UserRole, code)       # the pill's colour
+            self.table.setItem(r, self.COL_STATUS, status)
+
+            due = QTableWidgetItem(due_label(t) or "—")
+            due.setData(Qt.UserRole, t.get("due_date") or "")   # red / amber
+            due.setToolTip(t.get("due_date") or "No due date")
+            self.table.setItem(r, self.COL_DUE, due)
+
+            # The replaced button is only deleted on the next event loop pass;
+            # hide it now so it never shows through for a frame.
+            old = self.table.cellWidget(r, self.COL_LAUNCH)
+            if old is not None:
+                old.hide()
+            self.table.setCellWidget(r, self.COL_LAUNCH, self._launch_button(t))
         self.table.setUpdatesEnabled(True)
 
-        total, shown = len(self._tasks), len(self._rows)
-        self.count.setText(f"{shown} of {total}" if shown != total
-                           else (str(total) if total else ""))
         if self._loading and not self._tasks:
             return
-        self.stack.setCurrentWidget(self.table if shown else self.empty)
+        if self._rows:
+            self.stack.setCurrentWidget(self.table)
+        elif not self._tasks:
+            self.stack.setCurrentWidget(self.caught_up)
+        else:
+            where = self.project_box.currentText() \
+                if self.project_box.currentData() is not None else ""
+            what = self._chip_label(self._chip) if self._chip != ALL else ""
+            self.filtered_title.setText(
+                "No tasks match" + (f" {what}" if what else "")
+                + (f" in {where}" if where else ""))
+            self.stack.setCurrentWidget(self.filtered_empty)
+
+    def _launch_button(self, task):
+        """▶ the app last used on this task; the arrow lists every DCC."""
+        btn = QToolButton()
+        btn.setObjectName("launchBtn")
+        btn.setCursor(Qt.PointingHandCursor)
+        btn.setFixedWidth(128)
+        menu = QMenu(btn)
+        menu.aboutToShow.connect(
+            lambda m=menu, t=task: (m.clear(), self._add_launch_actions(m, t)))
+        btn.setMenu(menu)
+
+        last = self._last_launch.get(str(task["id"]))
+        if last:
+            package, version = last
+            label = config.DCC_LABELS.get(package, package.title())
+            btn.setText(f"▶  {label}")
+            btn.setToolTip(f"Launch {label} {version} on this task")
+            btn.setPopupMode(QToolButton.MenuButtonPopup)
+            btn.setProperty("split", True)        # styled with an arrow area
+            btn.clicked.connect(
+                lambda _=False, t=task, p=package, v=version:
+                self.package_launched.emit(t, p, v))
+        else:
+            btn.setText("▶  Open…  ▾")
+            btn.setToolTip("Choose an app to open this task in")
+            btn.setPopupMode(QToolButton.InstantPopup)
+        return btn
 
     def _open_row(self, row, _col=0):
         if 0 <= row < len(self._rows):

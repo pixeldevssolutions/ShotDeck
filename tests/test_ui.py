@@ -963,27 +963,118 @@ def test_the_done_statuses_are_filtered_by_shotgrid_not_locally():
     assert ["sg_status_list", "not_in", config.TASK_DONE_STATUSES] in filters
 
 
-def test_home_filters_combine():
+def test_home_chips_and_project_filter():
     import datetime
     from ui.home_tasks import filter_tasks
 
     today = datetime.date(2026, 9, 27)
     tasks = [
-        dict(fakes.TASK, id=1, content="Comp", due_date="2026-09-20"),
-        dict(fakes.TASK, id=2, content="Comp", due_date="2026-10-01",
-             project=OTHER_PROJECT),
-        dict(fakes.TASK, id=3, content="Light", due_date=None,
-             sg_status_list="rdy"),
+        dict(fakes.TASK, id=1, due_date="2026-09-20"),                 # late
+        dict(fakes.TASK, id=2, due_date="2026-10-01",
+             project=OTHER_PROJECT),                                   # soon
+        dict(fakes.TASK, id=3, due_date=None, sg_status_list="rdy"),
+        dict(fakes.TASK, id=4, due_date="2026-12-01"),                 # later
     ]
     ids = lambda **kw: [t["id"] for t in filter_tasks(tasks, today=today, **kw)]
-    assert ids(due="overdue") == [1]
-    assert ids(due="week") == [1, 2]
-    assert ids(due="none") == [3]
+    assert ids() == [1, 2, 3, 4]
+    assert ids(chip="overdue") == [1]
+    assert ids(chip="week") == [2], "overdue has its own chip"
+    assert ids(chip="status:rdy") == [3]
     assert ids(project_id=OTHER_PROJECT["id"]) == [2]
-    assert ids(status="rdy") == [3]
-    assert ids(text="show002 comp") == [2]
-    assert ids(text="comp", project_id=fakes.PROJECT["id"]) == [1, 3]  # step
-    assert ids(text="light", due="none") == [3]
+    assert ids(chip="overdue", project_id=OTHER_PROJECT["id"]) == []
+
+
+def test_due_dates_read_as_words():
+    import datetime
+    from ui.home_tasks import due_label
+
+    today = datetime.date(2026, 9, 27)           # a Sunday
+    say = lambda d: due_label({"due_date": d}, today)
+    assert say("2026-09-25") == "2 days late"
+    assert say("2026-09-26") == "1 day late"
+    assert say("2026-09-27") == "Today"
+    assert say("2026-09-28") == "Tomorrow"
+    assert say("2026-10-02") == "Fri 2 Oct"
+    assert say("2027-01-05") == "Tue 5 Jan 2027"
+    assert say(None) == ""
+
+
+def _home_with(tasks, statuses=(("ip", "In Progress"), ("rdy", "Ready"))):
+    from ui.home_tasks import HomeTasks
+
+    home = HomeTasks()
+    home.set_statuses(list(statuses))
+    home.set_tasks(tasks)
+    return home
+
+
+def test_home_sorts_by_due_with_undated_last_and_on_header_click():
+    home = _home_with([
+        dict(fakes.TASK, id=1, content="B", due_date=None),
+        dict(fakes.TASK, id=2, content="C", due_date="2026-10-05"),
+        dict(fakes.TASK, id=3, content="A", due_date="2026-09-01"),
+    ])
+    assert [t["id"] for t in home._rows] == [3, 2, 1]
+    home._on_header_clicked(home.COL_DUE)          # descending
+    assert [t["id"] for t in home._rows] == [2, 3, 1], "no date stays last"
+    home._on_header_clicked(0)                     # by task name
+    assert [t["content"] for t in home._rows] == ["A", "B", "C"]
+
+
+def test_home_status_shows_the_label_and_chips_count():
+    home = _home_with([dict(fakes.TASK, id=1, sg_status_list="ip"),
+                       dict(fakes.TASK, id=2, sg_status_list="ip"),
+                       dict(fakes.TASK, id=3, sg_status_list="rdy")])
+    assert home.table.item(0, home.COL_STATUS).text() in ("In Progress", "Ready")
+    assert home._chip_buttons["status:ip"].text() == "In Progress  2"
+    assert home._chip_buttons["all"].text() == "All  3"
+
+    home._set_chip("status:rdy")
+    assert [t["id"] for t in home._rows] == [3]
+
+
+def test_filters_that_hide_everything_offer_a_way_back():
+    home = _home_with([dict(fakes.TASK, id=1, due_date=None)])
+    home._set_chip("overdue")
+    assert home.stack.currentWidget() is home.filtered_empty
+    assert "Overdue" in home.filtered_title.text()
+    home.clear_filters()
+    assert home.stack.currentWidget() is home.table
+
+
+def test_no_open_tasks_says_so():
+    home = _home_with([])
+    assert home.stack.currentWidget() is home.caught_up
+
+
+def test_launch_button_reopens_the_last_app_used_on_the_task():
+    task = dict(fakes.TASK, id=91)
+    home = _home_with([task])
+    button = home.table.cellWidget(0, home.COL_LAUNCH)
+    assert "Open" in button.text(), "nothing launched yet: choose an app"
+
+    home.remember_launch(task, "nuke", "16.0v7")
+    button = home.table.cellWidget(0, home.COL_LAUNCH)
+    assert "Nuke" in button.text()
+
+    got = []
+    home.package_launched.connect(lambda t, p, v: got.append((t["id"], p, v)))
+    button.click()
+    assert got == [(91, "nuke", "16.0v7")]
+
+    again = _home_with([task])           # a restart keeps the choice
+    assert "Nuke" in again.table.cellWidget(0, again.COL_LAUNCH).text()
+
+
+def test_the_projects_section_folds_away_and_stays_folded():
+    from ui.project_page import ProjectPage
+
+    page = ProjectPage()
+    page.toggle.setChecked(False)
+    assert page.stack.isHidden()
+    restarted = ProjectPage()
+    assert restarted.stack.isHidden(), "the choice survives a restart"
+    restarted.toggle.setChecked(True)           # leave it open for others
 
 
 def test_home_shows_open_tasks_and_opens_one_on_double_click():
@@ -997,7 +1088,6 @@ def test_home_shows_open_tasks_and_opens_one_on_double_click():
     home.project_box.setCurrentIndex(home.project_box.findData(
         OTHER_PROJECT["id"]))
     assert home.table.rowCount() == 1
-    assert home.count.text() == "1 of 3"
 
     home._open_row(0)
     settle()

@@ -1,9 +1,10 @@
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QScrollArea, QGridLayout,
-    QLabel, QStackedWidget,
+    QLabel, QStackedWidget, QToolButton, QSizePolicy,
 )
 
+from . import ui_state
 from .widgets import Tile, EmptyState
 
 TILE_WIDTH = 208     # tile plus spacing, used to work out the column count
@@ -22,9 +23,13 @@ class ProjectPage(QWidget):
         lay.setSpacing(14)
 
         top = QHBoxLayout()
-        heading = QLabel("Projects")
-        heading.setObjectName("headerTitle")
-        top.addWidget(heading)
+        # Folds the grid away so My Open Tasks gets the window; remembered.
+        self.toggle = QToolButton()
+        self.toggle.setObjectName("sectionToggle")
+        self.toggle.setCheckable(True)
+        self.toggle.setCursor(Qt.PointingHandCursor)
+        self.toggle.toggled.connect(self._set_expanded)
+        top.addWidget(self.toggle)
 
         self.count = QLabel("")
         self.count.setObjectName("tileSub")
@@ -63,6 +68,24 @@ class ProjectPage(QWidget):
         self._resize_timer.setSingleShot(True)
         self._resize_timer.setInterval(120)
         self._resize_timer.timeout.connect(self._relayout)
+
+        expanded = not ui_state.get("projects_collapsed", False)
+        self.toggle.blockSignals(True)
+        self.toggle.setChecked(expanded)
+        self.toggle.blockSignals(False)
+        self._set_expanded(expanded, save=False)
+
+    def _set_expanded(self, expanded, save=True):
+        self.toggle.setText(("▾  " if expanded else "▸  ") + "Projects")
+        self.stack.setVisible(expanded)
+        self.search.setVisible(expanded)
+        # Collapsed, the section keeps only its heading's height and the task
+        # list above takes the rest of the window.
+        self.setSizePolicy(QSizePolicy.Preferred,
+                           QSizePolicy.Expanding if expanded
+                           else QSizePolicy.Maximum)
+        if save:
+            ui_state.put("projects_collapsed", not expanded)
 
     def set_projects(self, projects):
         self._projects = projects

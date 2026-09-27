@@ -214,6 +214,11 @@ REVIEW_READ_STATE_PATH = os.environ.get(
     "FLOW_REVIEW_STATE",
     os.path.expanduser("~/.flow/review_read.json"))
 
+# Per-user UI choices: the app each task was last launched in, whether the
+# home page's projects section is folded. See ui/ui_state.py.
+UI_STATE_PATH = os.environ.get(
+    "FLOW_UI_STATE", os.path.expanduser("~/.flow/ui_state.json"))
+
 # Detail URL for an entity, used by "Open in ShotGrid".
 def entity_url(entity_type, entity_id):
     return f"{SG_SITE.rstrip('/')}/detail/{entity_type}/{entity_id}"

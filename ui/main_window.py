@@ -135,12 +135,12 @@ class MainWindow(QMainWindow):
         # tiles, so the day's work is visible without choosing a show first.
         self.home_tasks = HomeTasks()
         self.project_page = ProjectPage()
-        self.home = QSplitter(Qt.Vertical)
-        self.home.addWidget(self.home_tasks)
-        self.home.addWidget(self.project_page)
-        self.home.setChildrenCollapsible(False)
-        self.home.setHandleWidth(1)
-        self.home.setSizes([380, 320])
+        self.home = QWidget()
+        home_lay = QVBoxLayout(self.home)
+        home_lay.setContentsMargins(0, 0, 0, 0)
+        home_lay.setSpacing(0)
+        home_lay.addWidget(self.home_tasks, 3)
+        home_lay.addWidget(self.project_page, 2)
         self.software_page = SoftwarePage()
         self.review_page = ReviewPage(sg)
         self.stack.addWidget(self.home)
@@ -518,6 +518,7 @@ class MainWindow(QMainWindow):
             self._launch_failed(f"{package}-{version}", e)
             return
         self.console.tail(log_path)
+        self.home_tasks.remember_launch(task, package, version)
         self.statusBar().showMessage(
             f"Launched {package}-{version} (pid {pid}) "
             f"on task '{task.get('content', '')}' — see Terminal for output")
