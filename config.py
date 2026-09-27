@@ -432,4 +432,20 @@ RV_GLOB = os.environ.get(
 # should win. e.g. FLOW_RV_ARGS="-fullscreen -nofloat"
 RV_ARGS = shlex.split(os.environ.get("FLOW_RV_ARGS", ""))
 
+# --- client delivery (package_service) ---------------------------------------
+# Version statuses that mean "the client may have this". The newest Version per
+# shot in one of these is what gets delivered.
+DELIVERY_APPROVED_STATUSES = [
+    s for s in os.environ.get("FLOW_DELIVERY_APPROVED", "apr").split(",")
+    if s.strip()
+]
+# Same outbox the event daemon's sg_shot_delivery plugin writes to, so a shot
+# delivered from Flow and one delivered by status change land side by side.
+DELIVERY_OUTBOX = os.environ.get("FLOW_DELIVERY_OUTBOX",
+                                 "/jobs/DataIO/Outbox/client")
+# Shot status written after a clean delivery. Deliberately not "dlvr": that
+# status triggers the daemon plugin, which would deliver the shot a second time.
+# "" leaves the status alone.
+DELIVERY_DONE_STATUS = os.environ.get("FLOW_DELIVERY_DONE_STATUS", "dlvd")
+
 APP_TITLE = "Flow"

@@ -73,6 +73,35 @@ def ask_path(start_dir, extension, suggested=""):
     return chosen or None
 
 
+# -- USD (flow_dcc/usd.py) ------------------------------------------------
+#
+# Rhino 8 reads and writes .usd by extension. There is no menu (see install),
+# so run these from the Python editor:
+#     import flow_dcc; flow_dcc.adapter().action_publish_usd()
+
+def export_usd(path, root_prim=None):
+    """Export the selected objects. Rhino chooses USD from the extension.
+
+    `root_prim` is not applied: Rhino has no pxr to check the result either,
+    so an asset published from Rhino should be checked in usdview.
+    """
+    doc = _doc()
+    if not list(doc.Objects.GetSelectedObjects(False, False)):
+        raise RuntimeError(
+            "Select what this department publishes and publish again.")
+    if not doc.ExportSelected(path):
+        raise RuntimeError("Rhino refused to export {0} -- USD export needs "
+                           "Rhino 8 or later.".format(path))
+    return path
+
+
+def load_usd_stage(path):
+    """Import the stage into the open model -- a snapshot, not a live link."""
+    if not _doc().Import(path):
+        raise RuntimeError("Rhino could not import {0}".format(path))
+    return path
+
+
 # -- menu actions ---------------------------------------------------------
 
 common.bind(sys.modules[__name__])

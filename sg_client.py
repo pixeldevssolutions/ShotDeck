@@ -219,6 +219,31 @@ class SGClient:
         log.info("setting task %s status to %s", task_id, code)
         return self.sg.update("Task", task_id, {"sg_status_list": code})
 
+    def set_status(self, entity_type, entity_id, code):
+        log.info("setting %s %s status to %s", entity_type, entity_id, code)
+        return self.sg.update(entity_type, entity_id, {"sg_status_list": code})
+
+    def approved_shot_versions(self, project):
+        """The newest approved Version per shot in the project, sorted by
+        sequence then shot. One query; the reduction happens here."""
+        rows = self.sg.find(
+            "Version",
+            [["project", "is", {"type": "Project", "id": project["id"]}],
+             ["sg_status_list", "in", list(config.DELIVERY_APPROVED_STATUSES)]],
+            ["code", "created_at", "sg_status_list", "entity",
+             "entity.Shot.sg_sequence", config.VERSION_TASK_FIELD],
+            order=[{"field_name": "created_at", "direction": "desc"}],
+        )
+        latest = {}
+        for row in rows:
+            shot = row.get("entity") or {}
+            if shot.get("type") != "Shot" or shot["id"] in latest:
+                continue
+            latest[shot["id"]] = row
+        return sorted(latest.values(), key=lambda v: (
+            (v.get("entity.Shot.sg_sequence") or {}).get("name") or "",
+            v["entity"].get("name") or ""))
+
     # -- publishing --------------------------------------------------------
 
     def versions_for_task(self, task_id):

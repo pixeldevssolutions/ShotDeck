@@ -17,7 +17,7 @@ Two things Blender genuinely cannot do are handled rather than faked:
 import os
 import sys
 
-from . import ACTIONS, MENU_NAME, common
+from . import MENU_NAME, actions, common
 from .. import paths, versioning
 
 MENU_ID = "FLOW_MT_menu"
@@ -41,7 +41,7 @@ def install():
     uninstall()
     module = sys.modules[__name__]
     entries = []
-    for label, attr in ACTIONS:
+    for label, attr in actions(module):
         if label is None:
             entries.append(None)
             continue
@@ -161,6 +161,34 @@ def deadline_plugin_info(scene):
         "Threads": 0,                       # let the render node decide
         "Build": "None",                    # whichever Blender the pool has
     }
+
+
+# -- USD (flow_dcc/usd.py) ------------------------------------------------
+
+def export_usd(path, root_prim=None):
+    """Export the selected objects as this department's layer.
+
+    Blender's exporter is an operator, so it runs against the current
+    selection and reports through its return set rather than raising.
+    """
+    bpy = _bpy()
+    if not bpy.context.selected_objects:
+        raise RuntimeError(
+            "Select what this department publishes and publish again.")
+    kwargs = {"root_prim_path": "/" + root_prim} if root_prim else {}
+    result = bpy.ops.wm.usd_export(
+        filepath=path, selected_objects_only=True, export_animation=True,
+        **kwargs)
+    if "FINISHED" not in result:
+        raise RuntimeError("Blender's USD export returned {0}".format(result))
+    return path
+
+
+def load_usd_stage(path):
+    """Import the stage. Blender has no live USD stage: this is a snapshot,
+    and Load again after a publish to see the new layer."""
+    _bpy().ops.wm.usd_import(filepath=path)
+    return path
 
 
 # -- menu actions ---------------------------------------------------------

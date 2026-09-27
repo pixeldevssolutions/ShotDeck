@@ -12,6 +12,7 @@ from . import jobs
 from .widgets import STYLE, UserChip
 from .console import ConsolePanel
 from .project_page import ProjectPage
+from .package_dialog import PackageDialog
 from .publish_dialog import PublishDialog
 from .review_page import ReviewPage
 from .software_page import SoftwarePage
@@ -103,6 +104,17 @@ class MainWindow(QMainWindow):
             "supervisor pushed back")
         self.review_btn.toggled.connect(self.show_review)
         h.addWidget(self.review_btn)
+
+        # Only meaningful inside a project, so it comes and goes with one.
+        self.deliver_btn = QPushButton("Client Delivery")
+        self.deliver_btn.setObjectName("termBtn")
+        self.deliver_btn.setCursor(Qt.PointingHandCursor)
+        self.deliver_btn.setToolTip(
+            "Package approved versions for the client using the project's "
+            "delivery config")
+        self.deliver_btn.clicked.connect(self.client_delivery)
+        self.deliver_btn.hide()
+        h.addWidget(self.deliver_btn)
 
         self.term_btn = QPushButton("Terminal")
         self.term_btn.setObjectName("termBtn")
@@ -392,6 +404,7 @@ class MainWindow(QMainWindow):
     def show_projects(self):
         self.project = None
         self.back_btn.hide()
+        self.deliver_btn.hide()
         self.crumb.hide()
         self.crumb_project.hide()
         self.stack.setCurrentWidget(self.project_page)
@@ -405,6 +418,7 @@ class MainWindow(QMainWindow):
         self.crumb.show()
         self.crumb_project.show()
         self.back_btn.show()
+        self.deliver_btn.show()
         self.stack.setCurrentWidget(self.software_page)
         self.software_page.set_software([])
         self.software_page.set_loading()
@@ -485,6 +499,10 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(
                 f"Published Version {result.code} to "
                 f"'{task.get('content', '')}' as {self.sg.api_identity}")
+
+    def client_delivery(self):
+        if self.project:
+            PackageDialog(self.sg, self.project, self).exec()
 
     def view_versions(self, task):
         """Browse what has already been published on this task's entity."""

@@ -33,4 +33,20 @@ ACTIONS = [
     ("Context", "action_context"),
 ]
 
+# USD assembly and publish. Added to the menu of any host that can write a USD
+# layer, i.e. whose adapter defines export_usd(path, root_prim) and
+# load_usd_stage(path). See flow_dcc/usd.py.
+USD_ACTIONS = [
+    (None, None),
+    ("Load USD Stage", "action_load_usd_stage"),
+    ("Publish USD Layer...", "action_publish_usd"),
+    ("Open USD Folder", "action_open_usd_folder"),
+]
+
+
+def actions(module):
+    """The menu for one host: the shared list, plus USD where it applies."""
+    return ACTIONS + (USD_ACTIONS if hasattr(module, "export_usd") else [])
+
+
 MENU_NAME = "5and8"

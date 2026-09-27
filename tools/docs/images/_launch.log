@@ -1,0 +1,8 @@
+# Flow launch  UAT6 / SH010 / Compositing
+# rez env maya-2024 flow_context -- maya
+resolved: maya-2024  flow_context-1.0.0
+FLOW_PROJECT=UAT6  FLOW_PROJECT_ID=1213  FLOW_TASK=7631
+FLOW_ENTITY=SH010  FLOW_STEP=Comp
+PYTHONPATH=/software/pipeline/Flow/rez/flow_dcc:...
+Maya 2024 started (pid 48213)
+flow_dcc: 5and8 menu installed

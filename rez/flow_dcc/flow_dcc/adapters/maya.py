@@ -6,7 +6,7 @@ this module outside Maya (a test, a lint pass) does not explode.
 
 import sys
 
-from . import ACTIONS, MENU_NAME, common
+from . import MENU_NAME, actions, common
 
 MENU_OBJECT = "flowMenu"
 
@@ -34,7 +34,7 @@ def install():
     cmds.menu(MENU_OBJECT, label=MENU_NAME, parent=parent, tearOff=True)
 
     module = sys.modules[__name__]
-    for label, attr in ACTIONS:
+    for label, attr in actions(module):
         if label is None:
             cmds.menuItem(divider=True)
             continue
@@ -120,6 +120,45 @@ def deadline_plugin_info(scene):
         # frames that someone reviews tomorrow.
         "StrictErrorChecking": True,
     }
+
+
+# -- USD (flow_dcc/usd.py) ------------------------------------------------
+
+USD_PLUGIN = "mayaUsdPlugin"
+
+
+def export_usd(path, root_prim=None):
+    """Export the selection as this department's layer.
+
+    Selection, not the whole scene: a scene with the shot stage loaded holds
+    every other department's prims too, and exporting those back into this
+    layer is how a shot ends up with two of everything. `root_prim` is set for
+    assets, which must author everything under /<asset>.
+    """
+    cmds = _cmds()
+    if not cmds.ls(selection=True):
+        raise RuntimeError(
+            "Select what this department publishes (the camera, the "
+            "characters, the set dressing) and publish again.")
+    cmds.loadPlugin(USD_PLUGIN, quiet=True)
+    kwargs = {"rootPrim": root_prim} if root_prim else {}
+    cmds.mayaUSDExport(file=path, selection=True, frameRange=frame_range(),
+                       defaultUSDFormat="usdc", mergeTransformAndShape=True,
+                       **kwargs)
+    return path
+
+
+def load_usd_stage(path):
+    """The shot as a mayaUsd proxy shape. Once: a second load is a no-op."""
+    cmds = _cmds()
+    cmds.loadPlugin(USD_PLUGIN, quiet=True)
+    for shape in cmds.ls(type="mayaUsdProxyShape") or []:
+        if cmds.getAttr(shape + ".filePath") == path:
+            return shape
+    shape = cmds.createNode("mayaUsdProxyShape", name="flowShotStageShape")
+    cmds.setAttr(shape + ".filePath", path, type="string")
+    cmds.connectAttr("time1.outTime", shape + ".time")
+    return shape
 
 
 # -- menu actions ---------------------------------------------------------

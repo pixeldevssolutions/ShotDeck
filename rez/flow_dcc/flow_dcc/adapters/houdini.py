@@ -13,7 +13,7 @@ tested outside Houdini.
 import os
 import sys
 
-from . import ACTIONS, MENU_NAME, common
+from . import MENU_NAME, actions, common
 
 MENU_OBJECT = "flowMenu"
 
@@ -38,7 +38,7 @@ def install():
     menu = bar.addMenu(MENU_NAME)
     menu.setObjectName(MENU_OBJECT)
     module = sys.modules[__name__]
-    for label, attr in ACTIONS:
+    for label, attr in actions(module):
         if label is None:
             menu.addSeparator()
             continue
@@ -131,6 +131,65 @@ def deadline_plugin_info(scene):
         # is how one submission becomes an hour of duplicated work.
         "IgnoreInputs": False,
     }
+
+
+# -- USD (flow_dcc/usd.py) ------------------------------------------------
+
+SHOT_NODE = "flow_shot"
+BREAK_NODE = "flow_layer_break"
+
+
+def export_usd(path, root_prim=None):
+    """Write the selected LOP's stage as this department's layer.
+
+    Through a throwaway USD ROP, because the ROP is what honours the layer
+    break Load USD Stage puts under the stage: everything above it (the other
+    departments) is left out, so the layer holds only this department's work.
+    `root_prim` is not applied here -- in Solaris the artist authors under
+    /<asset> by primitive path, and usd.check_layer refuses a layer that
+    does not.
+    """
+    hou = _hou()
+    lop = None
+    for node in hou.selectedNodes():
+        if isinstance(node, hou.LopNode):
+            lop = node
+            break
+    if lop is None:
+        raise RuntimeError(
+            "Select the LOP node that ends this department's work (below "
+            "the flow_layer_break) and publish again.")
+
+    rop = hou.node("/out").createNode("usd", "flow_usd_publish")
+    try:
+        rop.parm("loppath").set(lop.path())
+        rop.parm("lopoutput").set(path)
+        start, end = frame_range()
+        rop.parm("trange").set(1)                 # render frame range
+        rop.parmTuple("f").set((start, end, 1))
+        rop.render()
+    finally:
+        rop.destroy()
+    return path
+
+
+def load_usd_stage(path):
+    """Sublayer the shot into /stage, with a layer break under it.
+
+    Reused when it is already there, so loading twice repoints the one
+    sublayer rather than stacking a second copy of the shot.
+    """
+    hou = _hou()
+    stage = hou.node("/stage")
+    sub = stage.node(SHOT_NODE) or stage.createNode("sublayer", SHOT_NODE)
+    sub.parm("filepath1").set(path)
+    brk = stage.node(BREAK_NODE)
+    if brk is None:
+        brk = stage.createNode("layerbreak", BREAK_NODE)
+        brk.setInput(0, sub)
+        brk.setDisplayFlag(True)
+        stage.layoutChildren()
+    return sub
 
 
 # -- menu actions ---------------------------------------------------------

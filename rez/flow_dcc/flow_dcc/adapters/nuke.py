@@ -6,7 +6,7 @@ imported and tested outside Nuke.
 
 import sys
 
-from . import ACTIONS, MENU_NAME, common
+from . import MENU_NAME, actions, common
 
 
 def _nuke():
@@ -22,7 +22,7 @@ def install():
 
     menu = nuke.menu("Nuke").addMenu(MENU_NAME)
     module = sys.modules[__name__]
-    for label, attr in ACTIONS:
+    for label, attr in actions(module):
         if label is None:
             menu.addSeparator()
             continue
@@ -80,6 +80,43 @@ def deadline_plugin_info(scene):
     if selected:
         info["WriteNode"] = selected[0]
     return info
+
+
+# -- USD (flow_dcc/usd.py) ------------------------------------------------
+
+def export_usd(path, root_prim=None):
+    """Write the selected 3D node's scene through a throwaway WriteGeo.
+
+    For what Nuke contributes to a shot -- a solved or tracked camera, cards.
+    `root_prim` is not applied: Nuke names prims after its nodes, and
+    usd.check_layer refuses an asset layer that is not under /<asset>.
+    """
+    nuke = _nuke()
+    source = nuke.selectedNodes()
+    if not source:
+        raise RuntimeError(
+            "Select the 3D node to publish (a Camera or a Scene) and publish "
+            "again.")
+    write = nuke.nodes.WriteGeo(inputs=[source[0]])
+    try:
+        write["file"].setValue(path)
+        write["file_type"].setValue("usd")
+        first, last = frame_range()
+        nuke.execute(write, first, last)
+    finally:
+        nuke.delete(write)
+    return path
+
+
+def load_usd_stage(path):
+    """A ReadGeo on the stage, reused if one already reads it."""
+    nuke = _nuke()
+    for node in nuke.allNodes("ReadGeo2"):
+        if node["file"].value() == path:
+            return node
+    node = nuke.nodes.ReadGeo2()
+    node["file"].setValue(path)
+    return node
 
 
 # -- menu actions ---------------------------------------------------------

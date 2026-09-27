@@ -10,7 +10,7 @@ import os
 import subprocess
 import sys
 
-from .. import context, deadline, paths, publish, versioning
+from .. import context, deadline, paths, publish, usd, versioning
 
 
 def save(adapter):
@@ -245,7 +245,14 @@ def bind(module):
     dialog cannot answer synchronously (Blender) has to own its own Save As,
     and overwriting it here would silently undo that.
     """
-    for name, func in ACTION_FUNCS.items():
+    funcs = dict(ACTION_FUNCS)
+    if hasattr(module, "export_usd"):
+        funcs.update({
+            "action_publish_usd": usd.action_publish_usd,
+            "action_load_usd_stage": usd.action_load_usd_stage,
+            "action_open_usd_folder": usd.action_open_usd_folder,
+        })
+    for name, func in funcs.items():
         if not hasattr(module, name):
             setattr(module, name, functools.partial(func, module))
     return module

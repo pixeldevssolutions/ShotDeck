@@ -12,7 +12,7 @@ pinning the package to one Painter release.
 import os
 import sys
 
-from . import ACTIONS, MENU_NAME, common
+from . import MENU_NAME, actions, common
 
 # Everything install() added, so a reload replaces the actions rather than
 # adding a second copy of each.
@@ -39,7 +39,7 @@ def install():
     uninstall()
 
     module = sys.modules[__name__]
-    for label, attr in ACTIONS:
+    for label, attr in actions(module):
         if label is None:
             continue                        # File draws its own dividers
         action = action_cls("{0}: {1}".format(MENU_NAME, label))

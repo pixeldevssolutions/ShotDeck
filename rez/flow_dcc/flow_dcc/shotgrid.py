@@ -45,6 +45,9 @@ FILE_TYPES = {
     ".psd": "Photoshop Document",
     ".aep": "After Effects Project",
     ".zpr": "ZBrush Project",
+    ".usd": "USD Scene",
+    ".usda": "USD Scene",
+    ".usdc": "USD Scene",
 }
 
 

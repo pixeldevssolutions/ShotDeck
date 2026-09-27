@@ -41,6 +41,12 @@ def build(project, software, task=None, login=None, email=None):
         # The sequence is only on the deep task field, so the DCC side cannot
         # derive it from the entity alone -- it is shown in the context panel.
         "sequence": paths._sequence(task) if task else "",
+        # The Asset template with this project filled in and {asset_type} /
+        # {asset} left as placeholders -- built by the same function as
+        # entity_root, so the two can never disagree about /jobs.
+        "asset_template": paths.entity_root(project, {
+            "entity": {"type": "Asset", "name": "{asset}"},
+            "entity.Asset.sg_asset_type": "{asset_type}"}) or "",
         "user": {
             "login": login or getpass.getuser(),
             "email": email or "",
@@ -106,6 +112,10 @@ def env(ctx, path):
         # this rather than re-deriving the templates on the DCC side.
         "FLOW_ENTITY_ROOT": ctx.get("entity_root") or "",
         "FLOW_SEQUENCE": ctx.get("sequence") or "",
+        # Where any asset of this project lives, with {asset_type} and
+        # {asset} left for the DCC to fill: a shot's USD stage references
+        # its assets by path, and the template must not be copied DCC-side.
+        "FLOW_ASSET_PATH_TEMPLATE": ctx.get("asset_template") or "",
         # Where shotgun_api3 lives, so a DCC can import it for publish
         # registration. A DCC ships its own Python with its own site-packages
         # and cannot see Flow's venv otherwise.
