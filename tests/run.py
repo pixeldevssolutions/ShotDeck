@@ -23,6 +23,9 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("SG_SCRIPT_KEY", "test-key-not-real")
 os.environ.setdefault("FLOW_LOG_DIR",
                       os.path.join(HERE, "_logs"))
+# Never read or write the developer's own ~/.flow state from a test run.
+os.environ.setdefault("FLOW_UI_STATE",
+                      os.path.join(HERE, "_logs", "ui_state.json"))
 
 # shotgun_api3 is not installed on a developer's Windows box, and none of these
 # tests reach the network. The client is imported for real either way.

@@ -107,10 +107,6 @@ class TaskMenu:
         task = self._rows[index.row()]
         self.table.selectRow(index.row())
 
-        # Scanned lazily so a newly released package shows up without a
-        # restart, and so a slow or absent mount costs nothing until asked.
-        self._packages = rez_scan.scan()
-
         menu = QMenu(self)
         entity = (task.get("entity") or {}).get("name", "")
         header = menu.addAction(
@@ -128,11 +124,20 @@ class TaskMenu:
         self._add_folder_actions(menu, task)
         menu.addSeparator()
 
+        self._add_launch_actions(menu, task)
+        menu.exec(self.table.viewport().mapToGlobal(pos))
+
+    def _add_launch_actions(self, menu, task):
+        """One entry per DCC in the rez tree, versions in a submenu.
+
+        Scanned here rather than once at startup, so a newly released package
+        shows up without a restart and a slow mount costs nothing until asked.
+        """
+        self._packages = rez_scan.scan()
         if not self._packages:
             empty = menu.addAction(
                 "No packages found in {0}".format(config.DCC_PACKAGES_ROOT))
             empty.setEnabled(False)
-            menu.exec(self.table.viewport().mapToGlobal(pos))
             return
 
         for package, versions in self._packages:
@@ -153,8 +158,6 @@ class TaskMenu:
                     lambda _=False, p=package, v=version:
                     self.package_launched.emit(task, p, v))
                 sub.addAction(act)
-
-        menu.exec(self.table.viewport().mapToGlobal(pos))
 
     def _add_publish_actions(self, menu, task):
         sub = QMenu("Publish", menu)

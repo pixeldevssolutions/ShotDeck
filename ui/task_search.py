@@ -73,7 +73,7 @@ class TaskSearch(QWidget):
 
         self.edit = QLineEdit()
         self.edit.setObjectName("taskSearch")
-        self.edit.setPlaceholderText("Search my tasks   (Ctrl+K)")
+        self.edit.setPlaceholderText("Search any task   (Ctrl+K)")
         self.edit.setClearButtonEnabled(True)
         self.edit.setFixedWidth(260)
         lay.addWidget(self.edit)

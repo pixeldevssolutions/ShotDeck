@@ -286,11 +286,17 @@ class EmptyState(QWidget):
 
 
 class StatusPill(QStyledItemDelegate):
-    """Draws a task status as a coloured pill instead of a bare short code."""
+    """Draws a task status as a coloured pill instead of a bare short code.
+
+    The cell shows its text. When Qt.UserRole holds the status code, the cell
+    is showing a label ("In Progress") and the code picks the colour; without
+    it the text is the code itself and is shown upper-case.
+    """
 
     def paint(self, painter, option, index):
-        code = index.data(Qt.DisplayRole) or ""
-        if not code:
+        shown = index.data(Qt.DisplayRole) or ""
+        code = index.data(Qt.UserRole) or shown
+        if not shown:
             return
 
         if option.state & QStyle.State_Selected:
@@ -307,8 +313,9 @@ class StatusPill(QStyledItemDelegate):
         font.setWeight(QFont.DemiBold)
         painter.setFont(font)
 
-        text = code.upper()
-        width = painter.fontMetrics().horizontalAdvance(text) + 20
+        text = shown if index.data(Qt.UserRole) else shown.upper()
+        width = min(painter.fontMetrics().horizontalAdvance(text) + 20,
+                    option.rect.width() - 16)
         height = 20
         rect = QRectF(option.rect.left() + 12,
                       option.rect.center().y() - height / 2 + 1,
@@ -329,12 +336,19 @@ class StatusPill(QStyledItemDelegate):
 
 
 class DueDate(QStyledItemDelegate):
-    """Due dates, with overdue ones picked out in red."""
+    """Due dates, with overdue ones picked out in red.
+
+    Reads the ISO date from Qt.UserRole when the cell shows friendlier text
+    ("2 days late"), otherwise from the text itself.
+    """
 
     def initStyleOption(self, option, index):
         super().initStyleOption(option, index)
         role = QPalette.ColorRole.Text
-        raw = (index.data(Qt.DisplayRole) or "").strip()
+        raw = index.data(Qt.UserRole)
+        if raw is None:
+            raw = index.data(Qt.DisplayRole)
+        raw = (raw or "").strip()
         if not raw:
             option.palette.setColor(role, QColor(theme.TEXT_FAINT))
             return
