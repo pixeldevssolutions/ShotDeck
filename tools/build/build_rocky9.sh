@@ -31,12 +31,24 @@ PYTHON="${FLOW_BUILD_PYTHON:-$(command -v python3.11 || command -v python3.12 ||
     echo "build: no Python found -- dnf install python3.11, or set FLOW_BUILD_PYTHON." >&2
     exit 1
 }
+# An activated venv's python3.11 wins the PATH lookup above. Build from the
+# interpreter it was made from, not from another venv's symlink.
+PYTHON="$("$PYTHON" -c 'import sys; print(getattr(sys, "_base_executable", "") or sys.executable)')"
 echo "python : $PYTHON ($("$PYTHON" -V))"
 
 VENV="$APP_ROOT/build/venv"
-if [ ! -x "$VENV/bin/python" ]; then
+# A half-made venv from a failed run leaves bin/python behind as a dead link;
+# test that it actually runs, not just that the name exists.
+if ! "$VENV/bin/python" -V >/dev/null 2>&1; then
+    rm -rf "$VENV"
     echo "creating build venv at $VENV"
-    "$PYTHON" -m venv "$VENV"
+    # Shared mounts under /software may refuse symlinks, which venv uses by
+    # default; copying the interpreter works everywhere.
+    "$PYTHON" -m venv "$VENV" 2>/dev/null && "$VENV/bin/python" -V >/dev/null 2>&1 || {
+        rm -rf "$VENV"
+        echo "symlinked venv failed here -- retrying with copies"
+        "$PYTHON" -m venv --copies "$VENV"
+    }
 fi
 "$VENV/bin/python" -m pip install --quiet --upgrade pip
 "$VENV/bin/python" -m pip install --quiet -r requirements.txt pyinstaller
