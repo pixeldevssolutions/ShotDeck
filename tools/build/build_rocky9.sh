@@ -36,10 +36,22 @@ PYTHON="${FLOW_BUILD_PYTHON:-$(command -v python3.11 || command -v python3.12 ||
 PYTHON="$("$PYTHON" -c 'import sys; print(getattr(sys, "_base_executable", "") or sys.executable)')"
 echo "python : $PYTHON ($("$PYTHON" -V))"
 
+# PyInstaller imports ctypes. A Python compiled from source without
+# libffi-devel has no _ctypes, and fails only after the whole pip install.
+"$PYTHON" -c "import ctypes" 2>/dev/null || {
+    echo "build: $PYTHON has no ctypes (built without libffi-devel)." >&2
+    echo "       Use Rocky's own: sudo dnf install -y python3.11 &&" >&2
+    echo "       FLOW_BUILD_PYTHON=/usr/bin/python3.11 $0" >&2
+    exit 1
+}
+
 VENV="$APP_ROOT/build/venv"
-# A half-made venv from a failed run leaves bin/python behind as a dead link;
-# test that it actually runs, not just that the name exists.
-if ! "$VENV/bin/python" -V >/dev/null 2>&1; then
+# Rebuild the venv when it is broken (a failed run leaves bin/python as a dead
+# link) or was made from a different interpreter than this run uses.
+# pyvenv.cfg's "home" is the folder of the interpreter that made it.
+VENV_HOME="$(sed -n 's/^home *= *//p' "$VENV/pyvenv.cfg" 2>/dev/null || true)"
+if ! "$VENV/bin/python" -V >/dev/null 2>&1 || \
+        [ "$VENV_HOME" != "$(dirname "$PYTHON")" ]; then
     rm -rf "$VENV"
     echo "creating build venv at $VENV"
     # Shared mounts under /software may refuse symlinks, which venv uses by
