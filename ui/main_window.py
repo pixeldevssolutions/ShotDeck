@@ -11,6 +11,7 @@ import applog, config, launcher, paths, rv_player
 from . import jobs
 from .widgets import STYLE, UserChip
 from .console import ConsolePanel
+from .home_tasks import HomeTasks
 from .project_page import ProjectPage
 from .package_dialog import PackageDialog
 from .publish_dialog import PublishDialog
@@ -130,10 +131,19 @@ class MainWindow(QMainWindow):
 
         # pages, with the terminal as a collapsible bottom pane
         self.stack = QStackedWidget()
+        # Home: the artist's open tasks from every project above the project
+        # tiles, so the day's work is visible without choosing a show first.
+        self.home_tasks = HomeTasks()
         self.project_page = ProjectPage()
+        self.home = QSplitter(Qt.Vertical)
+        self.home.addWidget(self.home_tasks)
+        self.home.addWidget(self.project_page)
+        self.home.setChildrenCollapsible(False)
+        self.home.setHandleWidth(1)
+        self.home.setSizes([380, 320])
         self.software_page = SoftwarePage()
         self.review_page = ReviewPage(sg)
-        self.stack.addWidget(self.project_page)
+        self.stack.addWidget(self.home)
         self.stack.addWidget(self.software_page)
         self.stack.addWidget(self.review_page)
 
@@ -156,6 +166,8 @@ class MainWindow(QMainWindow):
                   activated=self.task_search.focus)
 
         self.project_page.project_selected.connect(self.open_project)
+        self.home_tasks.task_opened.connect(self.goto_task)
+        self.home_tasks.refresh_requested.connect(self._load_open_tasks)
         self.software_page.software_launched.connect(self.launch_software)
         self.software_page.task_selected.connect(self._on_task_selected)
         self.software_page.package_launched.connect(self.launch_package)
@@ -344,6 +356,7 @@ class MainWindow(QMainWindow):
         self.owner = owner
         self._projects = projects
         self.software_page.set_statuses(statuses)
+        self.home_tasks.set_statuses(statuses)
         if owner and owner.get("name"):
             self.user_chip.set_name(owner["name"])
         if not owner and config.TASK_OWNER_IS_ENTITY:
@@ -361,6 +374,15 @@ class MainWindow(QMainWindow):
         else:
             self.statusBar().showMessage(f"Connected — {len(projects)} projects")
         self.project_page.set_projects(projects)
+        self._load_open_tasks()
+
+    def _load_open_tasks(self):
+        """The home page's task list: every unfinished task, all projects."""
+        self.home_tasks.set_loading()
+        self._run(self.sg.open_tasks, self.home_tasks.set_tasks,
+                  on_error=lambda m: (
+                      log.warning("could not load open tasks: %s", m),
+                      self.home_tasks.set_tasks([])))
 
     # -- searching every project's tasks -------------------------------------
 
@@ -407,7 +429,9 @@ class MainWindow(QMainWindow):
         self.deliver_btn.hide()
         self.crumb.hide()
         self.crumb_project.hide()
-        self.stack.setCurrentWidget(self.project_page)
+        self.stack.setCurrentWidget(self.home)
+        # Statuses may have changed inside the project; one query catches up.
+        self._load_open_tasks()
 
     def open_project(self, project):
         self.project = project

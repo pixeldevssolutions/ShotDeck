@@ -747,7 +747,15 @@ class SGClient:
         """
         return self._my_tasks(project=None, statuses=statuses)
 
-    def _my_tasks(self, project=None, statuses=None):
+    def open_tasks(self):
+        """The artist's unfinished tasks across all projects, for the home page.
+
+        Filtered server-side so a long career of finished tasks never crosses
+        the wire.
+        """
+        return self._my_tasks(exclude_statuses=config.TASK_DONE_STATUSES)
+
+    def _my_tasks(self, project=None, statuses=None, exclude_statuses=None):
         if config.TASK_OWNER_IS_ENTITY:
             if not self._owner:
                 return []
@@ -769,6 +777,8 @@ class SGClient:
                 0, ["project", "is", {"type": "Project", "id": project["id"]}])
         if statuses:
             filters.append(["sg_status_list", "in", statuses])
+        if exclude_statuses:
+            filters.append(["sg_status_list", "not_in", list(exclude_statuses)])
         return self.sg.find(
             "Task", filters, config.TASK_FIELDS,
             order=[{"field_name": "due_date", "direction": "asc"}],
