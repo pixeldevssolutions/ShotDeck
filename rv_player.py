@@ -23,6 +23,7 @@ bundled libraries on LD_LIBRARY_PATH. RV notices one of them itself --
 
 import glob
 import os
+import shutil
 import subprocess
 
 import applog
@@ -110,7 +111,7 @@ def executable():
         return [config.RV_EXECUTABLE], "FLOW_RV"
 
     version = config.RV_VERSION or _newest_rez_version()
-    if version is not None:
+    if version is not None and shutil.which(config.REZ_EXECUTABLE):
         request = rez_scan.request(config.RV_PACKAGE, version or None)
         return ([config.REZ_EXECUTABLE, "env", request, "--",
                  rez_scan.command_for(config.RV_PACKAGE)], "rez")
