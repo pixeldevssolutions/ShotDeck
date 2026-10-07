@@ -200,5 +200,41 @@ def test_without_rez_the_newest_installed_binary_is_found():
     assert missing == ""
 
 
+def _fake_package(root, package, version, package_py, files):
+    folder = os.path.join(root, package, version)
+    variant = os.path.join(folder, "platform-linux", "os-rocky-9.6")
+    for rel in files:
+        path = os.path.join(variant, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        open(path, "w").close()
+    with open(os.path.join(folder, "package.py"), "w") as fh:
+        fh.write(package_py)
+    return variant
+
+
+def test_without_rez_a_package_alias_is_followed():
+    saved = config.DCC_PACKAGES_ROOT
+    root = os.path.join(TMP, "alias")
+    pureref = _fake_package(
+        root, "pureref", "2.1.2",
+        'def commands():\n    alias("pureref", '
+        '"{root}/PureRef-2.1.2_x64.Appimage")\n',
+        ["PureRef-2.1.2_x64.Appimage"])
+    tde = _fake_package(
+        root, "3de", "8.1.0",
+        'def commands():\n    env.PATH.append("{root}/bin")\n'
+        '    alias("3de", "3DE4")\n',
+        ["bin/3DE4"])
+    try:
+        config.DCC_PACKAGES_ROOT = root
+        found_pureref = launcher.installed_binary("pureref", "2.1.2", "pureref")
+        found_3de = launcher.installed_binary("3de", None, "DD3DE4")
+    finally:
+        config.DCC_PACKAGES_ROOT = saved
+    assert os.path.normpath(found_pureref) == \
+        os.path.join(pureref, "PureRef-2.1.2_x64.Appimage")
+    assert os.path.normpath(found_3de) == os.path.join(tde, "bin", "3DE4")
+
+
 def teardown_module():
     shutil.rmtree(TMP, ignore_errors=True)

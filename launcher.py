@@ -1,5 +1,6 @@
 import glob
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -123,20 +124,48 @@ def launch_package(project, package, version=None, task=None,
     return launch(project, software, login=login, email=email, task=task)
 
 
-def installed_binary(package, version, command):
-    """bin/<command> inside the installed package, newest version first.
+# alias("pureref", "{root}/PureRef-2.1.2_x64.Appimage") in a package.py
+_ALIAS = re.compile(r"""alias\(\s*["']([^"']+)["']\s*,\s*["']([^"']+)["']""")
 
-    The farm layout is <DCC_PACKAGES_ROOT>/<package>/<version>/platform-*/
-    os-*/bin/<command>. Only for a session with no rez: the binary then runs
-    without whatever environment the package.py would have set.
+
+def installed_binary(package, version, command):
+    """The file `rez env <package> -- <command>` would run, found without rez.
+
+    Newest version first, unless one is pinned. In each variant root
+    (<version>/platform-*/os-*, else <version> itself) it tries bin/<command>,
+    then the package.py alias() for the command or the package name --
+    pureref is only an alias to an AppImage, 3de an alias to bin/3DE4.
+    Only for a session with no rez: the binary then runs without whatever
+    environment the package.py would have set.
     """
+    # ponytail: reads alias() only, not env.* -- enough for wrappers that set
+    # up their own libraries (rv, 3DE4, AppImages); rez is the real answer.
     # "/" rather than os.path.join: DCC_PACKAGES_ROOT is a POSIX mount.
-    pattern = "/".join([config.DCC_PACKAGES_ROOT.rstrip("/"), package,
-                        version or "*", "platform-*", "os-*", "bin", command])
-    found = [p for p in glob.glob(pattern) if os.access(p, os.X_OK)]
-    found.sort(key=lambda p: rez_scan.version_key(
-        os.path.normpath(p).split(os.sep)[-5]), reverse=True)
-    return found[0] if found else ""
+    base = "/".join([config.DCC_PACKAGES_ROOT.rstrip("/"), package])
+    version_dirs = sorted(
+        glob.glob(f"{base}/{version or '*'}"), reverse=True,
+        key=lambda d: rez_scan.version_key(os.path.basename(d)))
+    for version_dir in version_dirs:
+        aliases = _package_aliases(os.path.join(version_dir, "package.py"))
+        names = [command, aliases.get(command), aliases.get(package)]
+        roots = sorted(glob.glob(f"{version_dir}/platform-*/os-*"))
+        for root in roots + [version_dir]:
+            for name in filter(None, names):
+                path = name.replace("{root}", root)
+                if "/" not in path:
+                    path = os.path.join(root, "bin", path)
+                if os.path.isfile(path) and os.access(path, os.X_OK):
+                    return path
+    return ""
+
+
+def _package_aliases(package_py):
+    """{alias: target} from a package.py, {} when there is none."""
+    try:
+        with open(package_py, encoding="utf-8", errors="replace") as fh:
+            return dict(_ALIAS.findall(fh.read()))
+    except OSError:
+        return {}
 
 
 def _build_command(software, rez_pkgs=None):
