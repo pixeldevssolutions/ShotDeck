@@ -1,3 +1,4 @@
+import glob
 import os
 import shlex
 import shutil
@@ -56,6 +57,12 @@ def launch(project, software, login=None, email=None, task=None):
 
     _preflight(cmd, software)
     _keep_tools_paths_through_rez(cmd, env, tools)
+    if name == config.RV_PACKAGE and not rez_pkgs:
+        # Started straight from its package folder, RV would otherwise load
+        # Flow's Qt and Python instead of its own.
+        import rv_player   # here, not at the top: rv_player imports launcher
+        for var in rv_player.HOSTILE_VARS:
+            env.pop(var, None)
 
     log.info("in-DCC tools: %s", config.DCC_SOURCE_ROOT)
     log.info("context package: %s", config.CONTEXT_SOURCE_ROOT)
@@ -97,15 +104,39 @@ def launch_package(project, package, version=None, task=None,
     shot: the command is passed to rez, so nothing has to be typed once the
     environment resolves.
     """
+    exe = rez_scan.command_for(package)
+    rez_request = " ".join(
+        [rez_scan.request(package, version)] + list(extra_packages))
+    if shutil.which(config.REZ_EXECUTABLE) is None:
+        direct = installed_binary(package, version, exe)
+        if direct:
+            log.warning("rez is not on PATH — starting %s directly, without "
+                        "the package's rez environment", direct)
+            exe, rez_request = direct, ""
     software = {
         "code": package,
         "version": version or "",
-        config.SOFTWARE_REZ_FIELD: " ".join(
-            [rez_scan.request(package, version)] + list(extra_packages)),
-        "linux_path": rez_scan.command_for(package),
+        config.SOFTWARE_REZ_FIELD: rez_request,
+        "linux_path": exe,
         "linux_args": "",
     }
     return launch(project, software, login=login, email=email, task=task)
+
+
+def installed_binary(package, version, command):
+    """bin/<command> inside the installed package, newest version first.
+
+    The farm layout is <DCC_PACKAGES_ROOT>/<package>/<version>/platform-*/
+    os-*/bin/<command>. Only for a session with no rez: the binary then runs
+    without whatever environment the package.py would have set.
+    """
+    # "/" rather than os.path.join: DCC_PACKAGES_ROOT is a POSIX mount.
+    pattern = "/".join([config.DCC_PACKAGES_ROOT.rstrip("/"), package,
+                        version or "*", "platform-*", "os-*", "bin", command])
+    found = [p for p in glob.glob(pattern) if os.access(p, os.X_OK)]
+    found.sort(key=lambda p: rez_scan.version_key(
+        os.path.normpath(p).split(os.sep)[-5]), reverse=True)
+    return found[0] if found else ""
 
 
 def _build_command(software, rez_pkgs=None):

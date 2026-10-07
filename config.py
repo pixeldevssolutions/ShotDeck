@@ -1,5 +1,8 @@
 import os
 import shlex
+import shutil
+import subprocess
+import sys
 
 SG_SITE = os.environ.get("SG_SITE", "https://5and8.shotgrid.autodesk.com")
 SG_SCRIPT_NAME = os.environ.get("SG_SCRIPT_NAME", "SG_daemon")
@@ -370,6 +373,45 @@ VERSION_WORKFILE_FIELD = os.environ.get("FLOW_VERSION_WORKFILE_FIELD", "")
 # rez entry point. Set FLOW_REZ_EXECUTABLE to an absolute path when the
 # artist's login shell does not put rez on PATH.
 REZ_EXECUTABLE = os.environ.get("FLOW_REZ_EXECUTABLE", "rez")
+
+
+def _merge_login_shell_env(env_dump):
+    """Fold PATH and REZ_* from `env -0` output into os.environ.
+
+    PATH entries are appended, so the session's own order still wins; REZ_*
+    only fills what is unset. Anything ~/.bashrc prints lands in front of the
+    first entry and is skipped with it -- PATH is never the first one.
+    """
+    have = os.environ.get("PATH", "").split(os.pathsep)
+    for item in env_dump.split(b"\0"):
+        key, _, value = item.decode(errors="replace").partition("=")
+        if key == "PATH":
+            have += [p for p in value.split(os.pathsep) if p and p not in have]
+            os.environ["PATH"] = os.pathsep.join(p for p in have if p)
+        elif key.startswith("REZ_"):
+            os.environ.setdefault(key, value)
+
+
+def _borrow_rez_from_login_shell():
+    """Recover the studio rez setup when Flow starts without it.
+
+    A desktop icon starts Flow from the graphical session, which never reads
+    ~/.bashrc, so the rez setup sourced there is missing -- for the frozen
+    binary and flow.sh alike. Asking an interactive login shell for its
+    environment picks up the same PATH (and REZ_CONFIG_FILE) a terminal has.
+    """
+    if not sys.platform.startswith("linux") or shutil.which(REZ_EXECUTABLE):
+        return
+    try:
+        dump = subprocess.run(
+            ["bash", "-lic", "env -0"], stdin=subprocess.DEVNULL,
+            capture_output=True, timeout=15).stdout
+    except (OSError, subprocess.SubprocessError):
+        return
+    _merge_login_shell_env(dump)
+
+
+_borrow_rez_from_login_shell()
 
 # Released DCC packages, one folder per package and per version inside it.
 # The right-click menu on a task is built from this tree.

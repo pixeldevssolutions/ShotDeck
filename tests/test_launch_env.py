@@ -155,5 +155,50 @@ def test_the_source_tree_is_what_imports_without_a_released_package():
         os.path.join(config.DCC_SOURCE_ROOT, "flow_dcc", "__init__.py")
 
 
+def test_login_shell_env_adds_rez_path_without_overriding_the_session():
+    saved = {k: os.environ.get(k) for k in
+             ("PATH", "REZ_CONFIG_FILE", "REZ_PACKAGES_PATH")}
+    try:
+        os.environ["PATH"] = os.pathsep.join(["/usr/bin", "/bin"])
+        os.environ["REZ_PACKAGES_PATH"] = "/mine"
+        os.environ.pop("REZ_CONFIG_FILE", None)
+        login_path = os.pathsep.join(["/opt/rez/bin", "/usr/bin"])
+        config._merge_login_shell_env(
+            b"bashrc noise\nHOME=/home/a\0"
+            + f"PATH={login_path}".encode() + b"\0"
+            b"REZ_CONFIG_FILE=/software/rezconfig.py\0"
+            b"REZ_PACKAGES_PATH=/theirs\0")
+        assert os.environ["PATH"].split(os.pathsep) == \
+            ["/usr/bin", "/bin", "/opt/rez/bin"]
+        assert os.environ["REZ_CONFIG_FILE"] == "/software/rezconfig.py"
+        assert os.environ["REZ_PACKAGES_PATH"] == "/mine"
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
+def test_without_rez_the_newest_installed_binary_is_found():
+    saved = config.DCC_PACKAGES_ROOT
+    root = os.path.join(TMP, "dcc")
+    for version in ("2.0.0", "3.1.0", "10.0.0"):
+        folder = os.path.join(root, "openrv", version, "platform-linux",
+                              "os-rocky-9.6", "bin")
+        os.makedirs(folder)
+        open(os.path.join(folder, "rv"), "w").close()
+    try:
+        config.DCC_PACKAGES_ROOT = root
+        newest = launcher.installed_binary("openrv", None, "rv")
+        pinned = launcher.installed_binary("openrv", "3.1.0", "rv")
+        missing = launcher.installed_binary("openrv", "9.9.9", "rv")
+    finally:
+        config.DCC_PACKAGES_ROOT = saved
+    assert os.path.normpath(newest).split(os.sep)[-6:-4] ==         ["openrv", "10.0.0"]
+    assert os.path.normpath(pinned).split(os.sep)[-5] == "3.1.0"
+    assert missing == ""
+
+
 def teardown_module():
     shutil.rmtree(TMP, ignore_errors=True)
