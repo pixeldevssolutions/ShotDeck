@@ -1425,7 +1425,7 @@ def test_artist_filter_shows_one_artists_tasks_in_everyone_only():
     box.setCurrentIndex(box.findData("Rahul"))
     assert sorted(t["id"] for t in home._rows) == [1, 3]
 
-    home.set_everyone(False, reload=False)
+    home.set_scope("mine", reload=False)
     home._rebuild()
     assert box.isHidden()
     assert len(home._rows) == 3, "Mine ignores the artist pick"
@@ -1450,19 +1450,43 @@ def test_any_artist_can_switch_home_to_everyones_tasks():
     win = MainWindow(fakes.client(sg), login="jitesh")
     settle()
     home = win.home_tasks
-    assert not home.everyone, "an artist opens on their own tasks"
+    assert home.scope == "mine", "an artist opens on their own tasks"
     mine = home.table.rowCount()
 
-    home.scope_buttons[True].click()
+    home.scope_buttons["everyone"].click()
     settle()
     assert home.heading.text() == "All Open Tasks"
     assert home.table.rowCount() == mine + 1
     assert not home.table.isColumnHidden(home.COL_ARTIST)
 
-    home.scope_buttons[False].click()
+    home.scope_buttons["mine"].click()
     settle()
     assert home.table.rowCount() == mine
     assert home.table.isColumnHidden(home.COL_ARTIST)
+
+
+def test_leads_see_the_tasks_that_name_them_as_reviewer():
+    sg = fakes.FakeShotgun()
+    lead = config.TASK_LEAD_FIELD
+    me = fakes.ARTIST["email"]
+    fakes.add_task(sg, "Comp", owner=fakes.PRODUCER["email"])[lead] = \
+        f"priya@5and8.ai, {me}"
+    fakes.add_task(sg, "Roto", owner=fakes.PRODUCER["email"])[lead] = \
+        "a" + me                            # a longer name is someone else
+    fakes.add_task(sg, "Paint", owner=fakes.PRODUCER["email"])
+
+    review = fakes.client(sg).open_tasks(scope="review")
+    assert [t["content"] for t in review] == ["Comp"]
+
+    from ui.main_window import MainWindow
+    win = MainWindow(fakes.client(sg), login="jitesh")
+    settle()
+    home = win.home_tasks
+    home.scope_buttons["review"].click()
+    settle()
+    assert home.heading.text() == "Tasks To Review"
+    assert home.table.rowCount() == 1
+    assert not home.table.isColumnHidden(home.COL_ARTIST), "whose work it is"
 
 
 def test_production_sees_every_artists_open_tasks_on_active_shows():
@@ -1473,7 +1497,7 @@ def test_production_sees_every_artists_open_tasks_on_active_shows():
         task["project"] = dict(task["project"], sg_status="Active")
 
     mine = fakes.client(sg).open_tasks()
-    everyone = fakes.client(sg).open_tasks(everyone=True)
+    everyone = fakes.client(sg).open_tasks(scope="everyone")
     assert "Paint" not in [t["content"] for t in mine]
     assert "Paint" in [t["content"] for t in everyone]
     assert "Roto" not in [t["content"] for t in everyone], "finished stays out"

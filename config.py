@@ -195,6 +195,11 @@ NOTES_MIN_REFRESH_SECONDS = 5
 
 # -- production view -------------------------------------------------------
 #
+# Leads and reviewers: a String field on Task holding the people who review
+# it, in the same form as TASK_OWNER_FIELD (several separated by commas).
+# Their "To Review" list is the tasks that name them here.
+TASK_LEAD_FIELD = os.environ.get("FLOW_TASK_LEAD_FIELD", "sg_lead_reviewer")
+#
 # Anyone can switch the home page between their own tasks and every
 # artist's. Logins listed in FLOW_PRODUCTION_USERS=rahul,priya open on
 # every artist's.

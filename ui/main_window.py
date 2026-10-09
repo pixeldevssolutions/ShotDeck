@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
 )
 
 import applog, config, launcher, notes_service, paths, rv_player
+from sg_client import EVERYONE
 from . import jobs
 from .widgets import STYLE, UserChip
 from .console import ConsolePanel
@@ -404,10 +405,10 @@ class MainWindow(QMainWindow):
     def _load_open_tasks(self):
         """The home page's task list: every unfinished task, all projects."""
         self.home_tasks.set_loading()
-        everyone = self.home_tasks.everyone
-        self._run(lambda: self.sg.open_tasks(everyone=everyone),
+        scope = self.home_tasks.scope
+        self._run(lambda: self.sg.open_tasks(scope=scope),
                   # A switch flipped mid-load: only the newest scope lands.
-                  lambda tasks: everyone == self.home_tasks.everyone
+                  lambda tasks: scope == self.home_tasks.scope
                   and self._on_open_tasks(tasks),
                   on_error=lambda m: (
                       log.warning("could not load open tasks: %s", m),
@@ -418,7 +419,7 @@ class MainWindow(QMainWindow):
         self._load_task_notes()
         # ponytail: Everyone skips Latest Version -- every version on every
         # show is too big a query; page it per project if they ask for it.
-        if tasks and not self.home_tasks.everyone:
+        if tasks and self.home_tasks.scope != EVERYONE:
             # For the menu's Latest Version entry: one query for the lot.
             self._run(self.sg.latest_versions_for_tasks,
                       self.home_tasks.set_latest_versions,
@@ -514,8 +515,8 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Loading apps and tasks...")
 
         self._run(self.sg.software_for_project, self._on_software, project)
-        everyone = self.home_tasks.everyone
-        self._run(lambda p: self.sg.my_tasks(p, everyone=everyone),
+        scope = self.home_tasks.scope
+        self._run(lambda p: self.sg.my_tasks(p, scope=scope),
                   self._on_tasks, project)
 
     def _on_software(self, softwares):
