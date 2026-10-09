@@ -285,10 +285,12 @@ class TaskMenu:
 
 
 class TasksTable(TaskMenu, QWidget):
-    COLS = ["Task", "Link", "Step", "Status", "Latest Version", "Due"]
+    COLS = ["Task", "Link", "Step", "Status", "Latest Version", "Start",
+            "Due"]
     COL_STATUS = 3
     COL_LATEST = 4
-    COL_DUE = 5
+    COL_START = 5
+    COL_DUE = 6
 
     task_selected = Signal(object)          # the Task dict, or None
     package_launched = Signal(object, str, str)   # task, package, version
@@ -342,9 +344,11 @@ class TasksTable(TaskMenu, QWidget):
         header.setSectionResizeMode(2, QHeaderView.ResizeToContents) # Step
         header.setSectionResizeMode(self.COL_STATUS, QHeaderView.Fixed)
         header.setSectionResizeMode(self.COL_LATEST, QHeaderView.Fixed)
+        header.setSectionResizeMode(self.COL_START, QHeaderView.Fixed)
         header.setSectionResizeMode(self.COL_DUE, QHeaderView.Fixed)
         header.resizeSection(self.COL_STATUS, 110)
         header.resizeSection(self.COL_LATEST, 150)
+        header.resizeSection(self.COL_START, 110)
         header.resizeSection(self.COL_DUE, 110)
         header.setHighlightSections(False)
         self.table.verticalHeader().hide()
@@ -450,7 +454,7 @@ class TasksTable(TaskMenu, QWidget):
             row_vals = [
                 t.get("content", ""), entity, step,
                 t.get("sg_status_list", ""), latest_text,
-                t.get("due_date") or "",
+                t.get("start_date") or "", t.get("due_date") or "",
             ]
             if text and not any(text in str(v).lower() for v in row_vals):
                 continue
@@ -462,7 +466,7 @@ class TasksTable(TaskMenu, QWidget):
                 item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
                 if c == 1:                      # the shot or asset name
                     item.setForeground(QColor(theme.TEXT))
-                elif c == 2:
+                elif c in (2, self.COL_START):
                     item.setForeground(QColor(theme.TEXT_DIM))
                 elif c == self.COL_LATEST:
                     item.setForeground(QColor(
