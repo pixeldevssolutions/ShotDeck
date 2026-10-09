@@ -199,6 +199,11 @@ NOTES_MIN_REFRESH_SECONDS = 5
 # it, in the same form as TASK_OWNER_FIELD (several separated by commas).
 # Their "To Review" list is the tasks that name them here.
 TASK_LEAD_FIELD = os.environ.get("FLOW_TASK_LEAD_FIELD", "sg_lead_reviewer")
+# Setting a task to this status in Flow asks the artist for a note and mails
+# the task's leads (review_mail.py), through the pipeline's mailer.
+REVIEW_MAIL_STATUS = os.environ.get("FLOW_REVIEW_MAIL_STATUS", "prw")
+PIPELINE_ROOT = os.environ.get("PIPELINE_ROOT",
+                               "/software/pipeline/vfx-ingest-pipeline")
 #
 # Anyone can switch the home page between their own tasks and every
 # artist's. Logins listed in FLOW_PRODUCTION_USERS=rahul,priya open on

@@ -4,10 +4,10 @@ from PySide6.QtCore import Qt, QThreadPool
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QMenu, QPushButton, QStackedWidget, QMessageBox, QSplitter,
+    QMenu, QPushButton, QStackedWidget, QMessageBox, QSplitter, QInputDialog,
 )
 
-import applog, config, launcher, notes_service, paths, rv_player
+import applog, config, launcher, notes_service, paths, review_mail, rv_player
 from sg_client import EVERYONE
 from . import jobs
 from .widgets import STYLE, UserChip
@@ -620,6 +620,10 @@ class MainWindow(QMainWindow):
         """Write a status change back to ShotGrid, off the UI thread."""
         task_id = task["id"]
         old = task.get("sg_status_list") or ""
+        for_review = code == config.REVIEW_MAIL_STATUS
+        note = self._ask_review_note(task) if for_review else ""
+        if note is None:
+            return                      # cancelled: the status stays as it was
         self.statusBar().showMessage(
             f"Setting '{task.get('content', '')}' to {code}…")
         # Show it straight away; put it back if the write fails.
@@ -628,12 +632,15 @@ class MainWindow(QMainWindow):
 
         def write():
             self.sg.set_task_status(task_id, code)
-            return task_id, code
+            mailed = self._send_for_review(task, note, old, code) \
+                if for_review else ""
+            return task_id, code, mailed
 
         def done(result):
-            _, new_code = result
+            _, new_code, mailed = result
             self.statusBar().showMessage(
-                f"'{task.get('content', '')}' is now {new_code}")
+                f"'{task.get('content', '')}' is now {new_code}"
+                + (f" - {mailed}" if mailed else ""))
 
         def failed(msg):
             log.error("could not set status on task %s: %s", task_id, msg)
@@ -646,6 +653,33 @@ class MainWindow(QMainWindow):
                 f"The task is still {old or 'unset'}.")
 
         self._run(write, done, on_error=failed)
+
+    def _ask_review_note(self, task):
+        """The artist's note for the leads; None if they cancel."""
+        text, ok = QInputDialog.getMultiLineText(
+            self, "Send for review",
+            f"Note for the leads on '{task.get('content', '')}':")
+        return text.strip() if ok else None
+
+    def _send_for_review(self, task, note, old, code):
+        """Post the note on the task and mail the leads. On the worker, after
+        the status is saved: a failure here is reported, never undoes it."""
+        if note:
+            try:
+                self.sg.create_note(task["project"], None, note,
+                                    "Ready for review", task)
+            except Exception as e:
+                log.warning("review note on task %s failed: %s",
+                            task["id"], e)
+        try:
+            to = review_mail.send(
+                self.sg.sg, task, notes_service.signer_name(self.login),
+                self.email, note, old, code)
+        except Exception as e:
+            log.warning("review mail for task %s failed: %s", task["id"], e)
+            return f"review mail failed: {e}"
+        return (f"mailed {', '.join(to)}" if to
+                else f"nobody in {config.TASK_LEAD_FIELD} to mail")
 
     def open_folder(self, path):
         try:
