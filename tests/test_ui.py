@@ -1371,3 +1371,169 @@ def _window(auth=True):
 def _labels(widget):
     from PySide6.QtWidgets import QLabel
     return "\n".join(l.text() for l in widget.findChildren(QLabel))
+
+
+# -- task notes and the production view --------------------------------------
+
+def test_notes_column_counts_sorts_newest_first_and_opens_on_click():
+    import datetime
+
+    home = _home_with([dict(fakes.TASK, id=1, content="A"),
+                       dict(fakes.TASK, id=2, content="B"),
+                       dict(fakes.TASK, id=3, content="C")])
+    home.set_notes({1: (2, datetime.datetime(2026, 10, 1, 9, 0)),
+                    3: (1, datetime.datetime(2026, 10, 8, 9, 0))})
+    home._on_header_clicked(home.COL_NOTES)
+    assert [t["id"] for t in home._rows] == [3, 1, 2], \
+        "newest conversation first, tasks without notes last"
+    assert home.table.item(1, home.COL_NOTES).text().startswith("✎ 2")
+    assert "Add note" in home.table.item(2, home.COL_NOTES).text()
+
+    got = []
+    home.notes_requested.connect(lambda t: got.append(t["id"]))
+    home._on_cell_clicked(0, home.COL_NOTES)
+    home._on_cell_clicked(0, home.COL_DUE)          # other cells do nothing
+    assert got == [3]
+
+
+def test_start_column_shows_the_date_and_sorts_undated_last():
+    home = _home_with([dict(fakes.TASK, id=1, start_date="2026-10-20"),
+                       dict(fakes.TASK, id=2, start_date=None),
+                       dict(fakes.TASK, id=3, start_date="2026-10-05")])
+    home._on_header_clicked(home.COL_START)
+    assert [t["id"] for t in home._rows] == [3, 1, 2]
+    assert home.table.item(0, home.COL_START).text() == "Mon 5 Oct"
+    assert home.table.item(2, home.COL_START).text() == "—"
+
+
+def test_artist_filter_shows_one_artists_tasks_in_everyone_only():
+    from ui.home_tasks import HomeTasks
+
+    owner = config.TASK_OWNER_FIELD
+    tasks = [dict(fakes.TASK, id=1, **{owner: {"type": "HumanUser", "id": 1,
+                                               "name": "Rahul"}}),
+             dict(fakes.TASK, id=2, **{owner: {"type": "HumanUser", "id": 2,
+                                               "name": "Priya"}}),
+             dict(fakes.TASK, id=3, **{owner: {"type": "HumanUser", "id": 1,
+                                               "name": "Rahul"}})]
+    home = HomeTasks(production=True)
+    home.set_tasks(tasks)
+    box = home.artist_box
+    assert [box.itemText(i) for i in range(box.count())] == \
+        ["All artists", "Priya", "Rahul"]
+
+    box.setCurrentIndex(box.findData("Rahul"))
+    assert sorted(t["id"] for t in home._rows) == [1, 3]
+
+    home.set_scope("mine", reload=False)
+    home._rebuild()
+    assert box.isHidden()
+    assert len(home._rows) == 3, "Mine ignores the artist pick"
+
+
+def test_artist_column_is_only_shown_for_everyones_tasks():
+    from ui.home_tasks import HomeTasks
+
+    assert HomeTasks().table.isColumnHidden(HomeTasks.COL_ARTIST)
+    assert not HomeTasks(production=True).table.isColumnHidden(
+        HomeTasks.COL_ARTIST)
+
+
+def test_any_artist_can_switch_home_to_everyones_tasks():
+    sg = _with_finished_work()
+    fakes.add_task(sg, "Paint", entity_name="AD1050",
+                   owner=fakes.PRODUCER["email"])
+    for task in sg.tasks:
+        task["project"] = dict(task["project"], sg_status="Active")
+
+    from ui.main_window import MainWindow
+    win = MainWindow(fakes.client(sg), login="jitesh")
+    settle()
+    home = win.home_tasks
+    assert home.scope == "mine", "an artist opens on their own tasks"
+    mine = home.table.rowCount()
+
+    home.scope_buttons["everyone"].click()
+    settle()
+    assert home.heading.text() == "All Open Tasks"
+    assert home.table.rowCount() == mine + 1
+    assert not home.table.isColumnHidden(home.COL_ARTIST)
+
+    home.scope_buttons["mine"].click()
+    settle()
+    assert home.table.rowCount() == mine
+    assert home.table.isColumnHidden(home.COL_ARTIST)
+
+
+def test_leads_see_the_tasks_that_name_them_as_reviewer():
+    sg = fakes.FakeShotgun()
+    lead = config.TASK_LEAD_FIELD
+    me = fakes.ARTIST["email"]
+    fakes.add_task(sg, "Comp", owner=fakes.PRODUCER["email"])[lead] = \
+        f"priya@5and8.ai, {me}"
+    fakes.add_task(sg, "Roto", owner=fakes.PRODUCER["email"])[lead] = \
+        "a" + me                            # a longer name is someone else
+    fakes.add_task(sg, "Paint", owner=fakes.PRODUCER["email"])
+
+    review = fakes.client(sg).open_tasks(scope="review")
+    assert [t["content"] for t in review] == ["Comp"]
+
+    from ui.main_window import MainWindow
+    win = MainWindow(fakes.client(sg), login="jitesh")
+    settle()
+    home = win.home_tasks
+    home.scope_buttons["review"].click()
+    settle()
+    assert home.heading.text() == "Tasks To Review"
+    assert home.table.rowCount() == 1
+    assert not home.table.isColumnHidden(home.COL_ARTIST), "whose work it is"
+
+
+def test_production_sees_every_artists_open_tasks_on_active_shows():
+    sg = _with_finished_work()
+    fakes.add_task(sg, "Paint", entity_name="AD1050",
+                   owner=fakes.PRODUCER["email"])
+    for task in sg.tasks:                   # only active shows are listed
+        task["project"] = dict(task["project"], sg_status="Active")
+
+    mine = fakes.client(sg).open_tasks()
+    everyone = fakes.client(sg).open_tasks(scope="everyone")
+    assert "Paint" not in [t["content"] for t in mine]
+    assert "Paint" in [t["content"] for t in everyone]
+    assert "Roto" not in [t["content"] for t in everyone], "finished stays out"
+
+    from ui.main_window import MainWindow
+    win = MainWindow(fakes.client(sg), login="rahul", production=True)
+    settle()
+    assert win.home_tasks.table.rowCount() == 4
+    artists = {win.home_tasks.table.item(r, win.home_tasks.COL_ARTIST).text()
+               for r in range(4)}
+    assert fakes.PRODUCER["email"] in artists
+
+
+def test_task_notes_chat_posts_a_signed_note_and_shows_it_as_mine():
+    from ui.task_notes import TaskNotesDialog
+
+    sg = fakes.FakeShotgun()
+    client = fakes.client(sg)
+    client.login = "jitesh"
+    sg.create("Note", {"content": "[rahul] Please check frame 1012",
+                       "tasks": [{"type": "Task", "id": fakes.TASK["id"]}],
+                       "user": fakes.PRODUCER})
+
+    dialog = TaskNotesDialog(client, fakes.PROJECT, fakes.TASK)
+    settle()
+    assert [m.author_name for m in dialog.messages] == ["rahul"]
+
+    posted = []
+    dialog.posted.connect(lambda: posted.append(True))
+    dialog.compose.setPlainText("Fixed in v005")
+    dialog.send()
+    settle()
+    settle()           # the post, then the reload it starts
+    assert posted
+    assert sg.notes[-1]["content"] == "[jitesh] Fixed in v005"
+    assert sg.notes[-1]["tasks"] == [{"type": "Task", "id": fakes.TASK["id"]}]
+    mine = [m for m in dialog.messages if dialog.service.can_modify(m)]
+    assert [m.content for m in mine] == ["Fixed in v005"]
+    assert dialog.compose.toPlainText() == ""

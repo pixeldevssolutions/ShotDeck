@@ -3,10 +3,17 @@ import threading
 
 import shotgun_api3
 
+import re
+
 import applog
 import config
+import notes_service
 
 log = applog.get()
+
+# Whose tasks a list holds: the artist's own, the ones they lead or review
+# (config.TASK_LEAD_FIELD), or every artist's.
+MINE, REVIEW, EVERYONE = "mine", "review", "everyone"
 
 
 def _newer(candidate, current, field):
@@ -48,6 +55,10 @@ def _media_fields(info):
 
 
 class SGClient:
+    # The signed-in AD login. Every write goes in as the one script user, so
+    # notes carry this in their text to say who wrote them. Set by MainWindow.
+    login = None
+
     def __init__(self):
         self._reset_caches()
         self._local = threading.local()
@@ -501,6 +512,24 @@ class SGClient:
             order=[{"field_name": "created_at", "direction": "desc"}],
         )
 
+    def notes_for_tasks(self, task_ids, fields=None):
+        """Notes on any of these tasks, oldest first.
+
+        Chunked: a whole show's task ids in a single `in` filter makes a
+        request big enough for ShotGrid to refuse.
+        """
+        ids = [i for i in (task_ids or []) if i]
+        rows = []
+        for start in range(0, len(ids), 500):
+            rows += self.sg.find(
+                "Note",
+                [["tasks", "in", [{"type": "Task", "id": i}
+                                  for i in ids[start:start + 500]]]],
+                fields or config.NOTE_FIELDS,
+                order=[{"field_name": "created_at", "direction": "asc"}],
+            )
+        return rows
+
     def notes_by_user(self, user, project=None, days=30):
         """Notes this artist wrote recently -- the ones replies can arrive on."""
         filters = [
@@ -540,12 +569,14 @@ class SGClient:
         )
 
     def create_note(self, project, version, content, subject="", task=None):
-        """A note on a Version, credited to the artist, not to the script."""
+        """A note on a Version (or, with version=None, on the task alone),
+        credited to the artist, not to the script."""
         data = {
             "project": {"type": "Project", "id": project["id"]},
             "subject": subject or "",
-            "content": content,
-            "note_links": [{"type": "Version", "id": version["id"]}],
+            "content": notes_service.sign(content, self.login),
+            "note_links": ([{"type": "Version", "id": version["id"]}]
+                           if version else []),
         }
         entity = (task or {}).get("entity")
         if entity:
@@ -556,13 +587,14 @@ class SGClient:
         if self._owner:
             data["user"] = {"type": self._owner["type"],
                             "id": self._owner["id"]}
-        log.info("adding a note to Version %s", version["id"])
+        log.info("adding a note to %s", f"Version {version['id']}" if version
+                 else f"Task {(task or {}).get('id')}")
         return self.sg.create("Note", data)
 
     def create_reply(self, note_id, content):
         data = {
             "entity": {"type": "Note", "id": note_id},
-            "content": content,
+            "content": notes_service.sign(content, self.login),
         }
         if self._owner:
             data["user"] = {"type": self._owner["type"],
@@ -573,7 +605,8 @@ class SGClient:
     def update_note(self, entity_type, entity_id, content):
         field = "content"
         log.info("editing %s %s", entity_type, entity_id)
-        return self.sg.update(entity_type, entity_id, {field: content})
+        return self.sg.update(entity_type, entity_id,
+                              {field: notes_service.sign(content, self.login)})
 
     def delete_entity(self, entity_type, entity_id):
         log.info("deleting %s %s", entity_type, entity_id)
@@ -735,8 +768,9 @@ class SGClient:
 
     # -- queries -----------------------------------------------------------
 
-    def my_tasks(self, project, statuses=None):
-        return self._my_tasks(project=project, statuses=statuses)
+    def my_tasks(self, project, statuses=None, scope=MINE):
+        return self._my_tasks(project=project, statuses=statuses,
+                              scope=scope)
 
     def all_my_tasks(self, statuses=None):
         """Every task assigned to this artist, across all projects.
@@ -747,31 +781,44 @@ class SGClient:
         """
         return self._my_tasks(project=None, statuses=statuses)
 
-    def open_tasks(self):
-        """The artist's unfinished tasks across all projects, for the home page.
+    def open_tasks(self, scope=MINE):
+        """Unfinished tasks across all projects, for the home page.
 
-        Filtered server-side so a long career of finished tasks never crosses
-        the wire.
+        The artist's own, the ones they review (scope=REVIEW), or every
+        artist's on every active show (scope=EVERYONE). Filtered server-side
+        so finished work never crosses the wire.
         """
-        return self._my_tasks(exclude_statuses=config.TASK_DONE_STATUSES)
+        return self._my_tasks(exclude_statuses=config.TASK_DONE_STATUSES,
+                              scope=scope)
 
-    def _my_tasks(self, project=None, statuses=None, exclude_statuses=None):
-        if config.TASK_OWNER_IS_ENTITY:
+    def _my_tasks(self, project=None, statuses=None, exclude_statuses=None,
+                  scope=MINE):
+        fields = config.TASK_FIELDS
+        if scope == EVERYONE:
+            filters = [] if project else \
+                [["project.Project.sg_status", "is", "Active"]]
+        elif scope == REVIEW:
+            if not self._owner_value:
+                return []
+            # Asked for only here: until the site has the field, only this
+            # list fails, not the artist's own.
+            fields = fields + [config.TASK_LEAD_FIELD]
+            filters = [[config.TASK_LEAD_FIELD, "contains", self._owner_value]]
+        elif config.TASK_OWNER_IS_ENTITY:
             if not self._owner:
                 return []
-            owner_filter = [
+            filters = [[
                 config.TASK_OWNER_FIELD, "is",
                 {"type": self._owner["type"], "id": self._owner["id"]},
-            ]
+            ]]
         else:
             if not self._owner_value:
                 return []
-            owner_filter = [
+            filters = [[
                 config.TASK_OWNER_FIELD,
                 config.TASK_OWNER_STRING_OP,
                 self._owner_value,
-            ]
-        filters = [owner_filter]
+            ]]
         if project:
             filters.insert(
                 0, ["project", "is", {"type": "Project", "id": project["id"]}])
@@ -779,7 +826,15 @@ class SGClient:
             filters.append(["sg_status_list", "in", statuses])
         if exclude_statuses:
             filters.append(["sg_status_list", "not_in", list(exclude_statuses)])
-        return self.sg.find(
-            "Task", filters, config.TASK_FIELDS,
+        tasks = self.sg.find(
+            "Task", filters, fields,
             order=[{"field_name": "due_date", "direction": "asc"}],
         )
+        if scope == REVIEW:
+            # "contains" also matches inside a longer name (al@ in sal@);
+            # keep only the tasks that list this exact person.
+            me = self._owner_value.lower()
+            tasks = [t for t in tasks if me in (
+                s.strip().lower() for s in
+                re.split(r"[,;]", t.get(config.TASK_LEAD_FIELD) or ""))]
+        return tasks

@@ -43,7 +43,7 @@ def current_user_email(login):
     return (os.environ.get("SGDESK_USER_EMAIL") or f"{login}@{USER_EMAIL_DOMAIN}").strip()
 
 TASK_FIELDS = [
-    "content", "sg_status_list", "due_date",
+    "content", "sg_status_list", "start_date", "due_date",
     "entity", "step", "project", TASK_OWNER_FIELD,
     # Deep fields, needed to build the folder path without a second query.
     "entity.Shot.sg_sequence",
@@ -192,6 +192,21 @@ USER_FIELDS = ["name", "email", "permission_rule_set", "image"]
 # Notes are re-read on demand, never polled. This is the shortest gap between
 # two refreshes that actually hits ShotGrid.
 NOTES_MIN_REFRESH_SECONDS = 5
+
+# -- production view -------------------------------------------------------
+#
+# Leads and reviewers: a String field on Task holding the people who review
+# it, in the same form as TASK_OWNER_FIELD (several separated by commas).
+# Their "To Review" list is the tasks that name them here.
+TASK_LEAD_FIELD = os.environ.get("FLOW_TASK_LEAD_FIELD", "sg_lead_reviewer")
+#
+# Anyone can switch the home page between their own tasks and every
+# artist's. Logins listed in FLOW_PRODUCTION_USERS=rahul,priya open on
+# every artist's.
+PRODUCTION_USERS = [
+    s.strip() for s in os.environ.get("FLOW_PRODUCTION_USERS", "").split(",")
+    if s.strip()
+]
 
 # -- the review inbox ------------------------------------------------------
 
