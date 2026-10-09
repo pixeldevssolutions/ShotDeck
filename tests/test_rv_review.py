@@ -47,7 +47,7 @@ def test_the_note_is_signed_linked_and_carries_the_frame():
     note = flow_review.send(sg, review, review["versions"][0],
                             "Edge flickers here", 1012, image)
     data = [c for c in sg.calls if c[:2] == ("create", "Note")][0][2]
-    assert data["content"] == "[priya] Edge flickers here"
+    assert data["content"] == "Priya: Edge flickers here"
     assert data["subject"] == "AD1030_v002 frame 1012"
     assert {"type": "Version", "id": 2} in data["note_links"]
     assert {"type": "Shot", "id": 9} in data["note_links"]

@@ -1532,7 +1532,7 @@ def test_task_notes_chat_posts_a_signed_note_and_shows_it_as_mine():
     settle()
     settle()           # the post, then the reload it starts
     assert posted
-    assert sg.notes[-1]["content"] == "[jitesh] Fixed in v005"
+    assert sg.notes[-1]["content"] == "Jitesh: Fixed in v005"
     assert sg.notes[-1]["tasks"] == [{"type": "Task", "id": fakes.TASK["id"]}]
     mine = [m for m in dialog.messages if dialog.service.can_modify(m)]
     assert [m.content for m in mine] == ["Fixed in v005"]
