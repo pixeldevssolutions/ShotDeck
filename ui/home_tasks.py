@@ -44,11 +44,21 @@ STATUS = "status:"          # prefix: "status:ip" keeps only that status
 WEEK_DAYS = 7
 
 
-def _due(task):
+def _due(task, field="due_date"):
     try:
-        return datetime.date.fromisoformat(task.get("due_date") or "")
+        return datetime.date.fromisoformat(task.get(field) or "")
     except ValueError:
         return None
+
+
+def start_label(task, today=None):
+    """"Thu 2 Oct" -- or "" with no start date."""
+    start = _due(task, "start_date")
+    if start is None:
+        return ""
+    today = today or datetime.date.today()
+    text = f"{start:%a} {start.day} {start:%b}"
+    return text if start.year == today.year else f"{text} {start.year}"
 
 
 def chip_matches(task, chip, today):
@@ -92,12 +102,13 @@ def due_label(task, today=None):
 
 class HomeTasks(TaskMenu, QWidget):
     COLS = ["Task", "Shot / Asset", "Project", "Step", "Artist", "Status",
-            "Due", "Notes", ""]
+            "Start", "Due", "Notes", ""]
     COL_ARTIST = 4
     COL_STATUS = 5
-    COL_DUE = 6
-    COL_NOTES = 7
-    COL_LAUNCH = 8
+    COL_START = 6
+    COL_DUE = 7
+    COL_NOTES = 8
+    COL_LAUNCH = 9
 
     task_opened = Signal(object)          # the Task dict
     notes_requested = Signal(object)      # the Task dict, from the Notes cell
@@ -187,7 +198,8 @@ class HomeTasks(TaskMenu, QWidget):
         header.setSectionResizeMode(0, QHeaderView.Stretch)
         for c in (1, 2, 3, self.COL_ARTIST):
             header.setSectionResizeMode(c, QHeaderView.ResizeToContents)
-        for c, width in ((self.COL_STATUS, 150), (self.COL_DUE, 110),
+        for c, width in ((self.COL_STATUS, 150), (self.COL_START, 110),
+                         (self.COL_DUE, 110),
                          (self.COL_NOTES, 140), (self.COL_LAUNCH, 150)):
             header.setSectionResizeMode(c, QHeaderView.Fixed)
             header.resizeSection(c, width)
@@ -402,6 +414,8 @@ class HomeTasks(TaskMenu, QWidget):
     def _sort_key(self, task, col):
         if col == self.COL_DUE:
             return _due(task)
+        if col == self.COL_START:
+            return _due(task, "start_date")
         if col == self.COL_STATUS:
             code = task.get("sg_status_list") or ""
             return self._status_labels.get(code, code).lower()
@@ -449,6 +463,12 @@ class HomeTasks(TaskMenu, QWidget):
             status = QTableWidgetItem(self._status_labels.get(code, code))
             status.setData(Qt.UserRole, code)       # the pill's colour
             self.table.setItem(r, self.COL_STATUS, status)
+
+            start = QTableWidgetItem(start_label(t) or "—")
+            start.setForeground(QColor(theme.TEXT_DIM if t.get("start_date")
+                                       else theme.TEXT_FAINT))
+            start.setToolTip(t.get("start_date") or "No start date")
+            self.table.setItem(r, self.COL_START, start)
 
             due = QTableWidgetItem(due_label(t) or "—")
             due.setData(Qt.UserRole, t.get("due_date") or "")   # red / amber

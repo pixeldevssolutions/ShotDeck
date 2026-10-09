@@ -1396,6 +1396,16 @@ def test_notes_column_counts_sorts_newest_first_and_opens_on_click():
     assert got == [3]
 
 
+def test_start_column_shows_the_date_and_sorts_undated_last():
+    home = _home_with([dict(fakes.TASK, id=1, start_date="2026-10-20"),
+                       dict(fakes.TASK, id=2, start_date=None),
+                       dict(fakes.TASK, id=3, start_date="2026-10-05")])
+    home._on_header_clicked(home.COL_START)
+    assert [t["id"] for t in home._rows] == [3, 1, 2]
+    assert home.table.item(0, home.COL_START).text() == "Mon 5 Oct"
+    assert home.table.item(2, home.COL_START).text() == "—"
+
+
 def test_artist_column_is_only_shown_for_everyones_tasks():
     from ui.home_tasks import HomeTasks
 

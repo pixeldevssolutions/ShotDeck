@@ -43,7 +43,7 @@ def current_user_email(login):
     return (os.environ.get("SGDESK_USER_EMAIL") or f"{login}@{USER_EMAIL_DOMAIN}").strip()
 
 TASK_FIELDS = [
-    "content", "sg_status_list", "due_date",
+    "content", "sg_status_list", "start_date", "due_date",
     "entity", "step", "project", TASK_OWNER_FIELD,
     # Deep fields, needed to build the folder path without a second query.
     "entity.Shot.sg_sequence",
