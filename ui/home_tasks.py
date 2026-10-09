@@ -163,6 +163,10 @@ class HomeTasks(TaskMenu, QWidget):
             top.addWidget(btn)
             self.scope_buttons[everyone] = btn
         top.addStretch()
+        # Everyone only: one artist's tasks, for a manager checking a load.
+        self.artist_box = QComboBox()
+        self.artist_box.setMinimumWidth(150)
+        top.addWidget(self.artist_box)
         self.project_box = QComboBox()
         self.project_box.setMinimumWidth(150)
         top.addWidget(self.project_box)
@@ -250,6 +254,7 @@ class HomeTasks(TaskMenu, QWidget):
 
         # Connected last, so filling the box never rebuilds a missing table.
         self.project_box.currentIndexChanged.connect(self._rebuild)
+        self.artist_box.currentIndexChanged.connect(self._rebuild)
         self.set_everyone(self.everyone, reload=False)
 
     # -- scope ----------------------------------------------------------------
@@ -263,6 +268,7 @@ class HomeTasks(TaskMenu, QWidget):
         self.scope_buttons[everyone].setChecked(True)
         # Whose task it is only matters when it is not always your own.
         self.table.setColumnHidden(self.COL_ARTIST, not everyone)
+        self.artist_box.setVisible(everyone)
         if changed and reload:
             self._tasks = []
             self.scope_changed.emit(everyone)
@@ -328,7 +334,8 @@ class HomeTasks(TaskMenu, QWidget):
 
     def clear_filters(self):
         self._chip = ALL
-        self.project_box.setCurrentIndex(0)     # rebuilds via the signal
+        self.artist_box.setCurrentIndex(0)      # each rebuilds via the signal
+        self.project_box.setCurrentIndex(0)
         self._rebuild()
 
     # -- data ---------------------------------------------------------------
@@ -362,25 +369,28 @@ class HomeTasks(TaskMenu, QWidget):
     def set_tasks(self, tasks):
         self._tasks = tasks
         self._loading = False
-        self._fill_projects()
-        self._rebuild()
-
-    def _fill_projects(self):
-        """Offer only the projects the artist has tasks on, keeping the pick."""
-        names = {}
+        projects = {}
         for t in self._tasks:
             p = t.get("project") or {}
             if p.get("id") is not None:
-                names[p["id"]] = p.get("name") or str(p["id"])
-        current = self.project_box.currentData()
-        self.project_box.blockSignals(True)
-        self.project_box.clear()
-        self.project_box.addItem("All projects", None)
-        for pid, name in sorted(names.items(), key=lambda x: x[1].lower()):
-            self.project_box.addItem(name, pid)
-        index = self.project_box.findData(current)
-        self.project_box.setCurrentIndex(index if index >= 0 else 0)
-        self.project_box.blockSignals(False)
+                projects[p["id"]] = p.get("name") or str(p["id"])
+        self._fill_box(self.project_box, "All projects", projects)
+        artists = {a: a for a in map(self._artist, self._tasks) if a}
+        self._fill_box(self.artist_box, "All artists", artists)
+        self._rebuild()
+
+    @staticmethod
+    def _fill_box(box, everything, names):
+        """Offer only what the tasks have, {data: name}, keeping the pick."""
+        current = box.currentData()
+        box.blockSignals(True)
+        box.clear()
+        box.addItem(everything, None)
+        for data, name in sorted(names.items(), key=lambda x: x[1].lower()):
+            box.addItem(name, data)
+        index = box.findData(current)
+        box.setCurrentIndex(index if index >= 0 else 0)
+        box.blockSignals(False)
 
     def set_notes(self, summary):
         """{task id: (count, newest created_at)} from NotesService."""
@@ -434,19 +444,26 @@ class HomeTasks(TaskMenu, QWidget):
 
     # -- view ---------------------------------------------------------------
 
-    def _values(self, task):
+    @staticmethod
+    def _artist(task):
         owner = task.get(config.TASK_OWNER_FIELD) or ""
+        return owner.get("name", "") if isinstance(owner, dict) else owner
+
+    def _values(self, task):
         return [
             task.get("content") or "",
             (task.get("entity") or {}).get("name", ""),
             (task.get("project") or {}).get("name", ""),
             (task.get("step") or {}).get("name", ""),
-            owner.get("name", "") if isinstance(owner, dict) else owner,
+            self._artist(task),
         ]
 
     def _rebuild(self):
         in_project = filter_tasks(self._tasks,
                                   project_id=self.project_box.currentData())
+        artist = self.artist_box.currentData() if self.everyone else None
+        if artist:
+            in_project = [t for t in in_project if self._artist(t) == artist]
         self._refresh_chips(in_project)
         self._rows = self._sorted(filter_tasks(in_project, chip=self._chip))
 
@@ -496,6 +513,7 @@ class HomeTasks(TaskMenu, QWidget):
             what = self._chip_label(self._chip) if self._chip != ALL else ""
             self.filtered_title.setText(
                 "No tasks match" + (f" {what}" if what else "")
+                + (f" for {artist}" if artist else "")
                 + (f" in {where}" if where else ""))
             self.stack.setCurrentWidget(self.filtered_empty)
 

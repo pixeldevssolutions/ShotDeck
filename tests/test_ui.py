@@ -1406,6 +1406,31 @@ def test_start_column_shows_the_date_and_sorts_undated_last():
     assert home.table.item(2, home.COL_START).text() == "—"
 
 
+def test_artist_filter_shows_one_artists_tasks_in_everyone_only():
+    from ui.home_tasks import HomeTasks
+
+    owner = config.TASK_OWNER_FIELD
+    tasks = [dict(fakes.TASK, id=1, **{owner: {"type": "HumanUser", "id": 1,
+                                               "name": "Rahul"}}),
+             dict(fakes.TASK, id=2, **{owner: {"type": "HumanUser", "id": 2,
+                                               "name": "Priya"}}),
+             dict(fakes.TASK, id=3, **{owner: {"type": "HumanUser", "id": 1,
+                                               "name": "Rahul"}})]
+    home = HomeTasks(production=True)
+    home.set_tasks(tasks)
+    box = home.artist_box
+    assert [box.itemText(i) for i in range(box.count())] == \
+        ["All artists", "Priya", "Rahul"]
+
+    box.setCurrentIndex(box.findData("Rahul"))
+    assert sorted(t["id"] for t in home._rows) == [1, 3]
+
+    home.set_everyone(False, reload=False)
+    home._rebuild()
+    assert box.isHidden()
+    assert len(home._rows) == 3, "Mine ignores the artist pick"
+
+
 def test_artist_column_is_only_shown_for_everyones_tasks():
     from ui.home_tasks import HomeTasks
 
