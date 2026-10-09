@@ -1396,12 +1396,38 @@ def test_notes_column_counts_sorts_newest_first_and_opens_on_click():
     assert got == [3]
 
 
-def test_artist_column_is_only_shown_to_production():
+def test_artist_column_is_only_shown_for_everyones_tasks():
     from ui.home_tasks import HomeTasks
 
     assert HomeTasks().table.isColumnHidden(HomeTasks.COL_ARTIST)
     assert not HomeTasks(production=True).table.isColumnHidden(
         HomeTasks.COL_ARTIST)
+
+
+def test_any_artist_can_switch_home_to_everyones_tasks():
+    sg = _with_finished_work()
+    fakes.add_task(sg, "Paint", entity_name="AD1050",
+                   owner=fakes.PRODUCER["email"])
+    for task in sg.tasks:
+        task["project"] = dict(task["project"], sg_status="Active")
+
+    from ui.main_window import MainWindow
+    win = MainWindow(fakes.client(sg), login="jitesh")
+    settle()
+    home = win.home_tasks
+    assert not home.everyone, "an artist opens on their own tasks"
+    mine = home.table.rowCount()
+
+    home.scope_buttons[True].click()
+    settle()
+    assert home.heading.text() == "All Open Tasks"
+    assert home.table.rowCount() == mine + 1
+    assert not home.table.isColumnHidden(home.COL_ARTIST)
+
+    home.scope_buttons[False].click()
+    settle()
+    assert home.table.rowCount() == mine
+    assert home.table.isColumnHidden(home.COL_ARTIST)
 
 
 def test_production_sees_every_artists_open_tasks_on_active_shows():
