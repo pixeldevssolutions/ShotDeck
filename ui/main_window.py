@@ -380,6 +380,8 @@ class MainWindow(QMainWindow):
         owner, projects, statuses = result
         self.owner = owner
         self._projects = projects
+        # Signs and credits the notes a lead sends from RV.
+        rv_player.reviewer = {"login": self.login, "user": owner}
         self.software_page.set_statuses(statuses)
         self.home_tasks.set_statuses(statuses)
         if owner and owner.get("name"):

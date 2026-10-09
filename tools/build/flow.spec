@@ -30,7 +30,10 @@ datas = [
     (root("rez", "flow_dcc"), "rez/flow_dcc"),
     (root("rez", "flow_context"), "rez/flow_context"),
 ]
-datas += collect_data_files("shotgun_api3")  # bundled cacerts
+# Bundled cacerts, and the .py sources: context._sg_api_path() hands this
+# folder to the DCCs and RV as FLOW_SG_API_PATH, and their own Pythons cannot
+# import from Flow's compiled archive.
+datas += collect_data_files("shotgun_api3", include_py_files=True)
 
 a = Analysis(
     [root("main.py")],
