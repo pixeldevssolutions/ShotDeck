@@ -195,11 +195,9 @@ NOTES_MIN_REFRESH_SECONDS = 5
 
 # -- production view -------------------------------------------------------
 #
-# Production managers see every open task on every active show, with who it
-# is assigned to, instead of only their own. Membership is the AD group below
-# (as the OS resolves it, like ai-users) or a login listed in
-# FLOW_PRODUCTION_USERS=rahul,priya.
-PRODUCTION_GROUP = os.environ.get("FLOW_PRODUCTION_GROUP", "production")
+# Anyone can switch the home page between their own tasks and every
+# artist's. Logins listed in FLOW_PRODUCTION_USERS=rahul,priya open on
+# every artist's.
 PRODUCTION_USERS = [
     s.strip() for s in os.environ.get("FLOW_PRODUCTION_USERS", "").split(",")
     if s.strip()

@@ -8,7 +8,6 @@ from PySide6.QtWidgets import (
 )
 
 import applog, config, launcher, notes_service, paths, rv_player
-from auth import group_check
 from . import jobs
 from .widgets import STYLE, UserChip
 from .console import ConsolePanel
@@ -27,10 +26,12 @@ log = applog.get()
 
 
 def is_production(login):
-    """Production sees every artist's tasks, not only their own."""
-    if login in config.PRODUCTION_USERS:
-        return True
-    return group_check.in_group_local(login, config.PRODUCTION_GROUP) is True
+    """Production opens on every artist's tasks rather than only their own.
+
+    ponytail: a login list for now; ShotGrid's permission group decides this
+    once managers and artists are told apart there.
+    """
+    return login in config.PRODUCTION_USERS
 
 
 class MainWindow(QMainWindow):
@@ -45,7 +46,8 @@ class MainWindow(QMainWindow):
         self.email = config.current_user_email(self.login)
         self.display_name = (auth_result.display_name if auth_result
                              else None) or self.login
-        self.production = is_production(self.login) if production is None             else production
+        self.production = is_production(self.login) if production is None \
+            else production
         self.sg.login = self.login      # signs the notes this session writes
         self.owner = None         # ShotGrid HumanUser, filled by _bootstrap
         self._projects = []       # full Project dicts, for the header search
@@ -180,6 +182,7 @@ class MainWindow(QMainWindow):
         self.home_tasks.task_opened.connect(self.goto_task)
         self.home_tasks.notes_requested.connect(self.open_task_notes)
         self.home_tasks.refresh_requested.connect(self._load_open_tasks)
+        self.home_tasks.scope_changed.connect(self._load_open_tasks)
         self.home_tasks.package_launched.connect(self.launch_package)
         self.home_tasks.folder_requested.connect(self.open_folder)
         self.home_tasks.status_change_requested.connect(self.set_task_status)
@@ -226,7 +229,7 @@ class MainWindow(QMainWindow):
                 ("Login", self.login),
                 ("Email", self.email)]
         if self.production:
-            rows.append(("View", "Production — every artist's tasks"))
+            rows.append(("View", "Production — opens on every artist's tasks"))
         if self.auth is not None:
             rows.append(("Signed in with",
                          self.AUTH_METHOD_LABELS.get(self.auth.method,
@@ -401,8 +404,11 @@ class MainWindow(QMainWindow):
     def _load_open_tasks(self):
         """The home page's task list: every unfinished task, all projects."""
         self.home_tasks.set_loading()
-        self._run(lambda: self.sg.open_tasks(everyone=self.production),
-                  self._on_open_tasks,
+        everyone = self.home_tasks.everyone
+        self._run(lambda: self.sg.open_tasks(everyone=everyone),
+                  # A switch flipped mid-load: only the newest scope lands.
+                  lambda tasks: everyone == self.home_tasks.everyone
+                  and self._on_open_tasks(tasks),
                   on_error=lambda m: (
                       log.warning("could not load open tasks: %s", m),
                       self.home_tasks.set_tasks([])))
@@ -410,9 +416,9 @@ class MainWindow(QMainWindow):
     def _on_open_tasks(self, tasks):
         self.home_tasks.set_tasks(tasks)
         self._load_task_notes()
-        # ponytail: production skips Latest Version -- every version on every
+        # ponytail: Everyone skips Latest Version -- every version on every
         # show is too big a query; page it per project if they ask for it.
-        if tasks and not self.production:
+        if tasks and not self.home_tasks.everyone:
             # For the menu's Latest Version entry: one query for the lot.
             self._run(self.sg.latest_versions_for_tasks,
                       self.home_tasks.set_latest_versions,
@@ -508,7 +514,8 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Loading apps and tasks...")
 
         self._run(self.sg.software_for_project, self._on_software, project)
-        self._run(lambda p: self.sg.my_tasks(p, everyone=self.production),
+        everyone = self.home_tasks.everyone
+        self._run(lambda p: self.sg.my_tasks(p, everyone=everyone),
                   self._on_tasks, project)
 
     def _on_software(self, softwares):

@@ -12,8 +12,8 @@ This answers it without picking a project first:
 - the Notes column counts the task's ShotGrid notes and dates the newest
   (sortable); clicking it opens the task's notes as a chat.
 
-Production managers get the same page over every open task on every active
-show, with an Artist column -- see config.PRODUCTION_GROUP.
+The Mine / Everyone switch shows every artist's open tasks on every active
+show instead, with an Artist column. Production starts on Everyone.
 
 "Open" means any status not in config.TASK_DONE_STATUSES. That filter runs on
 the server, so finished work never crosses the wire. The filters on this page
@@ -102,6 +102,7 @@ class HomeTasks(TaskMenu, QWidget):
     task_opened = Signal(object)          # the Task dict
     notes_requested = Signal(object)      # the Task dict, from the Notes cell
     refresh_requested = Signal()
+    scope_changed = Signal(bool)          # True: every artist's tasks
     # The task menu's actions, as on the project page's TasksTable.
     package_launched = Signal(object, str, str)
     folder_requested = Signal(str)
@@ -112,7 +113,9 @@ class HomeTasks(TaskMenu, QWidget):
 
     def __init__(self, production=False):
         super().__init__()
-        self.production = production
+        # Every artist's open tasks instead of only your own. Anyone can
+        # switch; production starts there.
+        self.everyone = production
         self._tasks = []
         self._rows = []
         self._status_labels = {}
@@ -132,10 +135,22 @@ class HomeTasks(TaskMenu, QWidget):
         lay.setSpacing(10)
 
         top = QHBoxLayout()
-        heading = QLabel("All Open Tasks" if production
-                         else "My Open Tasks")
-        heading.setObjectName("headerTitle")
-        top.addWidget(heading)
+        self.heading = QLabel()
+        self.heading.setObjectName("headerTitle")
+        top.addWidget(self.heading)
+        top.addSpacing(12)
+        scope = QButtonGroup(self)
+        self.scope_buttons = {}
+        for everyone, text in ((False, "Mine"), (True, "Everyone")):
+            btn = QPushButton(text)
+            btn.setObjectName("chip")
+            btn.setCheckable(True)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.clicked.connect(
+                lambda _=False, e=everyone: self.set_everyone(e))
+            scope.addButton(btn)
+            top.addWidget(btn)
+            self.scope_buttons[everyone] = btn
         top.addStretch()
         self.project_box = QComboBox()
         self.project_box.setMinimumWidth(150)
@@ -194,8 +209,6 @@ class HomeTasks(TaskMenu, QWidget):
         self.table.setItemDelegateForColumn(self.COL_DUE, DueDate(self.table))
         self.table.cellDoubleClicked.connect(self._open_row)
         self.table.cellClicked.connect(self._on_cell_clicked)
-        # Whose task it is only matters when it is not always your own.
-        self.table.setColumnHidden(self.COL_ARTIST, not production)
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._on_context_menu)
         self.stack.addWidget(self.table)
@@ -225,6 +238,22 @@ class HomeTasks(TaskMenu, QWidget):
 
         # Connected last, so filling the box never rebuilds a missing table.
         self.project_box.currentIndexChanged.connect(self._rebuild)
+        self.set_everyone(self.everyone, reload=False)
+
+    # -- scope ----------------------------------------------------------------
+
+    def set_everyone(self, everyone, reload=True):
+        """Mine or Everyone. The owner of the window reloads on scope_changed."""
+        changed = everyone != self.everyone
+        self.everyone = everyone
+        self.heading.setText("All Open Tasks" if everyone
+                             else "My Open Tasks")
+        self.scope_buttons[everyone].setChecked(True)
+        # Whose task it is only matters when it is not always your own.
+        self.table.setColumnHidden(self.COL_ARTIST, not everyone)
+        if changed and reload:
+            self._tasks = []
+            self.scope_changed.emit(everyone)
 
     # -- chips ----------------------------------------------------------------
 
@@ -364,7 +393,8 @@ class HomeTasks(TaskMenu, QWidget):
                 else Qt.AscendingOrder
         else:
             # Notes: the latest conversation first is the useful first click.
-            order = Qt.DescendingOrder if col == self.COL_NOTES                 else Qt.AscendingOrder
+            order = Qt.DescendingOrder if col == self.COL_NOTES \
+                else Qt.AscendingOrder
         self._sort = (col, order)
         self.table.horizontalHeader().setSortIndicator(col, order)
         self._rebuild()

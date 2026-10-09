@@ -788,7 +788,8 @@ class SGClient:
     def _my_tasks(self, project=None, statuses=None, exclude_statuses=None,
                   everyone=False):
         if everyone:
-            filters = [] if project else                 [["project.Project.sg_status", "is", "Active"]]
+            filters = [] if project else \
+                [["project.Project.sg_status", "is", "Active"]]
         elif config.TASK_OWNER_IS_ENTITY:
             if not self._owner:
                 return []
