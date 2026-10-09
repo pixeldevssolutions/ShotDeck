@@ -7,12 +7,37 @@ the same note, shown under the message it answers. Nothing is kept locally.
 ShotGrid is the source of truth for every note, author and timestamp here.
 
 No Qt: the browser renders threads, it does not build them.
+
+Every write goes through the one ShotGrid script user, so the author is not
+something ShotGrid can tell apart. Flow signs each note's text with the AD
+login instead -- "[jitesh] Fixed the edge" -- and reads that back as the author.
 """
+
+import re
 
 import applog
 import config
 
 log = applog.get()
+
+# "[login] " at the very start of a note. The first tag wins, so a note typed
+# as "[WIP] ..." is stored "[jitesh] [WIP] ..." and still reads as jitesh's.
+_SIGNATURE = re.compile(r"^\[([^\]\n]{1,64})\]\s*")
+
+
+def sign(content, login):
+    """content with "[login] " in front, unless it is already signed by login."""
+    if not login or content.startswith(f"[{login}]"):
+        return content
+    return f"[{login}] {content}"
+
+
+def signature(content):
+    """(login, text without the tag), or ("", content) for an unsigned note."""
+    match = _SIGNATURE.match(content or "")
+    if not match:
+        return "", content
+    return match.group(1).strip(), content[match.end():]
 
 
 class Message:
@@ -23,7 +48,8 @@ class Message:
         self.kind = kind                # "note" or "reply"
         self.id = raw["id"]
         self.entity_type = "Note" if kind == "note" else "Reply"
-        self.content = (raw.get("content") or "").strip()
+        self.signed_by, self.content = signature(
+            (raw.get("content") or "").strip())
         self.subject = (raw.get("subject") or "").strip()
         self.created_at = raw.get("created_at")
         self.user = raw.get("user") or {}
@@ -33,7 +59,8 @@ class Message:
 
     @property
     def author_name(self):
-        return self.author.get("name") or self.user.get("name") or "Unknown"
+        return (self.signed_by or self.author.get("name")
+                or self.user.get("name") or "Unknown")
 
     @property
     def author_role(self):
@@ -128,6 +155,38 @@ class NotesService:
         return sorted([e for e in events if e["when"]],
                       key=lambda e: e["when"], reverse=True)
 
+    def task_chat(self, task_id):
+        """Every note and reply on a task as one conversation, oldest first.
+
+        Notes made on the task's versions carry the task too, so they show
+        here as well. Three queries, as for threads().
+        """
+        notes = self.sg.notes_for_tasks([task_id]) or []
+        if not notes:
+            return []
+        replies = self.sg.replies_for_notes([n["id"] for n in notes]) or []
+        authors = self._authors(notes + replies)
+        messages = (
+            [Message(n, "note", authors.get(self._user_id(n))) for n in notes]
+            + [Message(r, "reply", authors.get(self._user_id(r)), depth=1)
+               for r in replies])
+        return sorted(messages, key=lambda m: str(m.created_at or ""))
+
+    def task_summary(self, task_ids):
+        """{task_id: (note count, newest note's created_at)} for a task list.
+
+        Only the two fields the column shows, for every task in one pass.
+        """
+        summary = {}
+        for note in self.sg.notes_for_tasks(
+                task_ids, fields=["tasks", "created_at"]) or []:
+            for link in note.get("tasks") or []:
+                count, latest = summary.get(link["id"], (0, None))
+                # Notes come back oldest first, so the last one seen is newest.
+                summary[link["id"]] = (count + 1,
+                                       note.get("created_at") or latest)
+        return summary
+
     # -- writing -----------------------------------------------------------
 
     def add_note(self, project, version, content, subject="", task=None):
@@ -148,7 +207,12 @@ class NotesService:
 
         The real gate is ShotGrid's permissions; this keeps buttons that are
         certain to fail off the screen rather than pretending to be one.
+
+        A signed note is decided by its signature alone: on a shared licence
+        everyone can resolve to the same ShotGrid user.
         """
+        if message.signed_by:
+            return message.signed_by == getattr(self.sg, "login", None)
         owner = getattr(self.sg, "owner", None)
         return message.written_by(owner)
 

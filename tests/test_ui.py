@@ -1371,3 +1371,84 @@ def _window(auth=True):
 def _labels(widget):
     from PySide6.QtWidgets import QLabel
     return "\n".join(l.text() for l in widget.findChildren(QLabel))
+
+
+# -- task notes and the production view --------------------------------------
+
+def test_notes_column_counts_sorts_newest_first_and_opens_on_click():
+    import datetime
+
+    home = _home_with([dict(fakes.TASK, id=1, content="A"),
+                       dict(fakes.TASK, id=2, content="B"),
+                       dict(fakes.TASK, id=3, content="C")])
+    home.set_notes({1: (2, datetime.datetime(2026, 10, 1, 9, 0)),
+                    3: (1, datetime.datetime(2026, 10, 8, 9, 0))})
+    home._on_header_clicked(home.COL_NOTES)
+    assert [t["id"] for t in home._rows] == [3, 1, 2], \
+        "newest conversation first, tasks without notes last"
+    assert home.table.item(1, home.COL_NOTES).text().startswith("✎ 2")
+    assert "Add note" in home.table.item(2, home.COL_NOTES).text()
+
+    got = []
+    home.notes_requested.connect(lambda t: got.append(t["id"]))
+    home._on_cell_clicked(0, home.COL_NOTES)
+    home._on_cell_clicked(0, home.COL_DUE)          # other cells do nothing
+    assert got == [3]
+
+
+def test_artist_column_is_only_shown_to_production():
+    from ui.home_tasks import HomeTasks
+
+    assert HomeTasks().table.isColumnHidden(HomeTasks.COL_ARTIST)
+    assert not HomeTasks(production=True).table.isColumnHidden(
+        HomeTasks.COL_ARTIST)
+
+
+def test_production_sees_every_artists_open_tasks_on_active_shows():
+    sg = _with_finished_work()
+    fakes.add_task(sg, "Paint", entity_name="AD1050",
+                   owner=fakes.PRODUCER["email"])
+    for task in sg.tasks:                   # only active shows are listed
+        task["project"] = dict(task["project"], sg_status="Active")
+
+    mine = fakes.client(sg).open_tasks()
+    everyone = fakes.client(sg).open_tasks(everyone=True)
+    assert "Paint" not in [t["content"] for t in mine]
+    assert "Paint" in [t["content"] for t in everyone]
+    assert "Roto" not in [t["content"] for t in everyone], "finished stays out"
+
+    from ui.main_window import MainWindow
+    win = MainWindow(fakes.client(sg), login="rahul", production=True)
+    settle()
+    assert win.home_tasks.table.rowCount() == 4
+    artists = {win.home_tasks.table.item(r, win.home_tasks.COL_ARTIST).text()
+               for r in range(4)}
+    assert fakes.PRODUCER["email"] in artists
+
+
+def test_task_notes_chat_posts_a_signed_note_and_shows_it_as_mine():
+    from ui.task_notes import TaskNotesDialog
+
+    sg = fakes.FakeShotgun()
+    client = fakes.client(sg)
+    client.login = "jitesh"
+    sg.create("Note", {"content": "[rahul] Please check frame 1012",
+                       "tasks": [{"type": "Task", "id": fakes.TASK["id"]}],
+                       "user": fakes.PRODUCER})
+
+    dialog = TaskNotesDialog(client, fakes.PROJECT, fakes.TASK)
+    settle()
+    assert [m.author_name for m in dialog.messages] == ["rahul"]
+
+    posted = []
+    dialog.posted.connect(lambda: posted.append(True))
+    dialog.compose.setPlainText("Fixed in v005")
+    dialog.send()
+    settle()
+    settle()           # the post, then the reload it starts
+    assert posted
+    assert sg.notes[-1]["content"] == "[jitesh] Fixed in v005"
+    assert sg.notes[-1]["tasks"] == [{"type": "Task", "id": fakes.TASK["id"]}]
+    mine = [m for m in dialog.messages if dialog.service.can_modify(m)]
+    assert [m.content for m in mine] == ["Fixed in v005"]
+    assert dialog.compose.toPlainText() == ""

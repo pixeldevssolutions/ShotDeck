@@ -8,7 +8,12 @@ This answers it without picking a project first:
 - double-click opens the task in its project, the same place the header search
   goes; right-click gives the project page's task menu (TaskMenu), acting on
   the task's own project, so there is no second copy of those actions;
-- one row of chips filters by due date or status, with live counts.
+- one row of chips filters by due date or status, with live counts;
+- the Notes column counts the task's ShotGrid notes and dates the newest
+  (sortable); clicking it opens the task's notes as a chat.
+
+Production managers get the same page over every open task on every active
+show, with an Artist column -- see config.PRODUCTION_GROUP.
 
 "Open" means any status not in config.TASK_DONE_STATUSES. That filter runs on
 the server, so finished work never crosses the wire. The filters on this page
@@ -86,12 +91,16 @@ def due_label(task, today=None):
 
 
 class HomeTasks(TaskMenu, QWidget):
-    COLS = ["Task", "Shot / Asset", "Project", "Step", "Status", "Due", ""]
-    COL_STATUS = 4
-    COL_DUE = 5
-    COL_LAUNCH = 6
+    COLS = ["Task", "Shot / Asset", "Project", "Step", "Artist", "Status",
+            "Due", "Notes", ""]
+    COL_ARTIST = 4
+    COL_STATUS = 5
+    COL_DUE = 6
+    COL_NOTES = 7
+    COL_LAUNCH = 8
 
     task_opened = Signal(object)          # the Task dict
+    notes_requested = Signal(object)      # the Task dict, from the Notes cell
     refresh_requested = Signal()
     # The task menu's actions, as on the project page's TasksTable.
     package_launched = Signal(object, str, str)
@@ -101,8 +110,9 @@ class HomeTasks(TaskMenu, QWidget):
     publish_requested = Signal(object)
     versions_requested = Signal(object)
 
-    def __init__(self):
+    def __init__(self, production=False):
         super().__init__()
+        self.production = production
         self._tasks = []
         self._rows = []
         self._status_labels = {}
@@ -115,13 +125,15 @@ class HomeTasks(TaskMenu, QWidget):
         self._latest = {}            # task id -> newest Version
         self._attention = {}         # the review dots are project-page only
         self._packages = []
+        self._notes = {}             # task id -> (count, newest created_at)
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(24, 18, 24, 8)
         lay.setSpacing(10)
 
         top = QHBoxLayout()
-        heading = QLabel("My Open Tasks")
+        heading = QLabel("All Open Tasks" if production
+                         else "My Open Tasks")
         heading.setObjectName("headerTitle")
         top.addWidget(heading)
         top.addStretch()
@@ -145,7 +157,8 @@ class HomeTasks(TaskMenu, QWidget):
             self._add_chip(key)
         self._status_chip_at = chips.count()
         chips.addStretch()
-        hint = QLabel("Double-click to open · right-click for more")
+        hint = QLabel("Double-click to open · right-click for more · "
+                      "click Notes to chat")
         hint.setObjectName("tileSub")
         chips.addWidget(hint)
         lay.addLayout(chips)
@@ -157,10 +170,10 @@ class HomeTasks(TaskMenu, QWidget):
         self.table.setHorizontalHeaderLabels(self.COLS)
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.Stretch)
-        for c in (1, 2, 3):
+        for c in (1, 2, 3, self.COL_ARTIST):
             header.setSectionResizeMode(c, QHeaderView.ResizeToContents)
         for c, width in ((self.COL_STATUS, 150), (self.COL_DUE, 110),
-                         (self.COL_LAUNCH, 150)):
+                         (self.COL_NOTES, 140), (self.COL_LAUNCH, 150)):
             header.setSectionResizeMode(c, QHeaderView.Fixed)
             header.resizeSection(c, width)
         header.setHighlightSections(False)
@@ -180,6 +193,9 @@ class HomeTasks(TaskMenu, QWidget):
                                             StatusPill(self.table))
         self.table.setItemDelegateForColumn(self.COL_DUE, DueDate(self.table))
         self.table.cellDoubleClicked.connect(self._open_row)
+        self.table.cellClicked.connect(self._on_cell_clicked)
+        # Whose task it is only matters when it is not always your own.
+        self.table.setColumnHidden(self.COL_ARTIST, not production)
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._on_context_menu)
         self.stack.addWidget(self.table)
@@ -325,6 +341,11 @@ class HomeTasks(TaskMenu, QWidget):
         self.project_box.setCurrentIndex(index if index >= 0 else 0)
         self.project_box.blockSignals(False)
 
+    def set_notes(self, summary):
+        """{task id: (count, newest created_at)} from NotesService."""
+        self._notes = summary or {}
+        self._rebuild()
+
     def remember_launch(self, task, package, version):
         """The app a task was last opened in, for its launch button."""
         self._last_launch[str(task["id"])] = [package, version]
@@ -342,7 +363,8 @@ class HomeTasks(TaskMenu, QWidget):
             order = Qt.DescendingOrder if order == Qt.AscendingOrder \
                 else Qt.AscendingOrder
         else:
-            order = Qt.AscendingOrder
+            # Notes: the latest conversation first is the useful first click.
+            order = Qt.DescendingOrder if col == self.COL_NOTES                 else Qt.AscendingOrder
         self._sort = (col, order)
         self.table.horizontalHeader().setSortIndicator(col, order)
         self._rebuild()
@@ -353,6 +375,8 @@ class HomeTasks(TaskMenu, QWidget):
         if col == self.COL_STATUS:
             code = task.get("sg_status_list") or ""
             return self._status_labels.get(code, code).lower()
+        if col == self.COL_NOTES:
+            return self._notes.get(task["id"], (0, None))[1]
         return str(self._values(task)[col]).lower()
 
     def _sorted(self, rows):
@@ -367,11 +391,13 @@ class HomeTasks(TaskMenu, QWidget):
     # -- view ---------------------------------------------------------------
 
     def _values(self, task):
+        owner = task.get(config.TASK_OWNER_FIELD) or ""
         return [
             task.get("content") or "",
             (task.get("entity") or {}).get("name", ""),
             (task.get("project") or {}).get("name", ""),
             (task.get("step") or {}).get("name", ""),
+            owner.get("name", "") if isinstance(owner, dict) else owner,
         ]
 
     def _rebuild(self):
@@ -385,7 +411,7 @@ class HomeTasks(TaskMenu, QWidget):
         for r, t in enumerate(self._rows):
             for c, v in enumerate(self._values(t)):
                 item = QTableWidgetItem(str(v))
-                if c in (2, 3):
+                if c in (2, 3, self.COL_ARTIST):
                     item.setForeground(QColor(theme.TEXT_DIM))
                 self.table.setItem(r, c, item)
 
@@ -398,6 +424,7 @@ class HomeTasks(TaskMenu, QWidget):
             due.setData(Qt.UserRole, t.get("due_date") or "")   # red / amber
             due.setToolTip(t.get("due_date") or "No due date")
             self.table.setItem(r, self.COL_DUE, due)
+            self.table.setItem(r, self.COL_NOTES, self._notes_item(t))
 
             # The replaced button is only deleted on the next event loop pass;
             # hide it now so it never shows through for a frame.
@@ -421,6 +448,25 @@ class HomeTasks(TaskMenu, QWidget):
                 "No tasks match" + (f" {what}" if what else "")
                 + (f" in {where}" if where else ""))
             self.stack.setCurrentWidget(self.filtered_empty)
+
+    def _notes_item(self, task):
+        count, latest = self._notes.get(task["id"], (0, None))
+        if not count:
+            item = QTableWidgetItem("+ Add note")
+            item.setForeground(QColor(theme.TEXT_FAINT))
+            item.setToolTip("No notes yet — click to write one")
+            return item
+        dated = hasattr(latest, "strftime")
+        item = QTableWidgetItem(
+            f"✎ {count}  ·  {latest:%d %b}" if dated else f"✎ {count}")
+        item.setToolTip(f"{count} note{'s' if count != 1 else ''}"
+                        + (f", newest {latest:%d %b %Y %H:%M}" if dated else "")
+                        + " — click to open")
+        return item
+
+    def _on_cell_clicked(self, row, col):
+        if col == self.COL_NOTES and 0 <= row < len(self._rows):
+            self.notes_requested.emit(self._rows[row])
 
     def _launch_button(self, task):
         """▶ the app last used on this task; the arrow lists every DCC."""

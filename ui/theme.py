@@ -255,6 +255,19 @@ QComboBox QAbstractItemView {{
     font-weight: 700; letter-spacing: 0.6px;
 }}
 
+/* ---- task notes chat ---- */
+#chatMine {{
+    background: {ACCENT_SUNK}; border: 1px solid {ACCENT};
+    border-radius: {RADIUS}px;
+}}
+#chatTheirs {{
+    background: {SURFACE_HI}; border: 1px solid {BORDER};
+    border-radius: {RADIUS}px;
+}}
+#chatMine QLabel, #chatTheirs QLabel {{ background: transparent; }}
+#chatMeta {{ color: {TEXT_FAINT}; font-size: 10px; }}
+#chatBody {{ color: {TEXT}; font-size: 12px; }}
+
 /* ---- preflight ---- */
 #checkOk {{ color: {OK}; font-size: 12px; }}
 #checkWarn {{ color: {WARN}; font-size: 12px; }}
