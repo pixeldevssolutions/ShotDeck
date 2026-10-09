@@ -19,6 +19,7 @@ import time
 
 import applog
 import config
+import notes_service
 
 log = applog.get()
 
@@ -196,8 +197,8 @@ class ReviewService:
 
         items = []
         for note in notes:
-            author_id = (note.get("user") or {}).get("id")
-            if author_id == owner.get("id"):
+            author, mine = self._author(note, authors, owner)
+            if mine:
                 continue                # your own note is not news to you
             version = _linked_version(note, by_id)
             if not version:
@@ -207,10 +208,23 @@ class ReviewService:
                 project=note.get("project"),
                 entity=version.get("entity"),
                 task=version.get("sg_task"),
-                version=version, note=note,
-                author=authors.get(author_id) or note.get("user"),
+                version=version, note=note, author=author,
                 text=note.get("content") or note.get("subject") or ""))
         return items
+
+    def _author(self, row, authors, owner):
+        """(who wrote it, whether that is the artist).
+
+        The signature first: Flow writes every note as the script user, so
+        the user field only names the author on notes made elsewhere.
+        """
+        signed, _ = notes_service.signature(row.get("content") or "")
+        if signed:
+            login = getattr(self.sg, "login", None) or ""
+            return {"name": signed}, signed.lower() == login.lower()
+        author_id = (row.get("user") or {}).get("id")
+        return (authors.get(author_id) or row.get("user"),
+                author_id == owner.get("id"))
 
     def _reply_items(self, owner, project, days):
         """Replies to notes the artist wrote, wherever those notes live."""
@@ -224,8 +238,8 @@ class ReviewService:
 
         items = []
         for reply in replies:
-            author_id = (reply.get("user") or {}).get("id")
-            if author_id == owner.get("id"):
+            author, mine = self._author(reply, authors, owner)
+            if mine:
                 continue
             note = by_id.get((reply.get("entity") or {}).get("id"))
             if not note:
@@ -236,8 +250,7 @@ class ReviewService:
                 project=note.get("project"),
                 entity=_note_entity(note),
                 task=(note.get("tasks") or [None])[0],
-                version=version, note=note,
-                author=authors.get(author_id) or reply.get("user"),
+                version=version, note=note, author=author,
                 text=reply.get("content") or ""))
         return items
 

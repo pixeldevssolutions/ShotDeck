@@ -19,6 +19,16 @@ def test_created_version_credits_the_artist():
     assert version["user"] == {"type": "HumanUser", "id": fakes.ARTIST["id"]}
 
 
+def test_a_version_description_is_signed_with_the_login():
+    client = fakes.client()
+    client.login = "jitesh"
+    version = client.create_version(fakes.PROJECT, fakes.TASK,
+                                    "SH010_Comp_v001", "Added for first pass")
+    assert version["description"] == "Jitesh: Added for first pass"
+    assert client.create_version(fakes.PROJECT, fakes.TASK,
+                                 "SH010_Comp_v002")["description"] == ""
+
+
 def test_media_fields_are_dropped_if_the_site_rejects_them():
     """One missing stock field must not cost the whole Version."""
     sg = fakes.FakeShotgun()

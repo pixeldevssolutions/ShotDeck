@@ -52,7 +52,7 @@ def test_the_note_is_signed_linked_and_carries_the_frame():
     assert {"type": "Version", "id": 2} in data["note_links"]
     assert {"type": "Shot", "id": 9} in data["note_links"]
     assert data["tasks"] == [{"type": "Task", "id": 77}]
-    assert data["user"] == {"type": "HumanUser", "id": 43}
+    assert "user" not in data, "the script writes it, signed by the lead"
     assert sg.uploads == [(note["id"], image, None)]
 
 

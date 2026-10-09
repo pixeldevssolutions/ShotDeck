@@ -81,9 +81,7 @@ def note_data(review, version, text, frame):
     task = version.get("task")
     if task:
         data["tasks"] = [{"type": "Task", "id": task["id"]}]
-    user = review.get("user")
-    if user:
-        data["user"] = {"type": user["type"], "id": user["id"]}
+    # No "user": the Note is the script's, the lead is the signature.
     return data
 
 

@@ -145,6 +145,11 @@ def register(path, ctx=None, description="", sg=None):
     }
     if ctx.entity_type and ctx.entity_id:
         data["entity"] = {"type": ctx.entity_type, "id": ctx.entity_id}
+    if description and ctx.user:
+        # Signed like Flow's notes: "Jitesh: Added for first pass".
+        name = ctx.user[:1].upper() + ctx.user[1:]
+        if not description.lower().startswith(name.lower() + ":"):
+            description = "%s: %s" % (name, description)
     if description:
         data["description"] = description
 

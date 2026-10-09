@@ -257,6 +257,9 @@ def _matches(version, filters):
                 else ""
             if str(value).lower() not in haystack.lower():
                 return False
+        elif op == "starts_with":
+            if not str(actual or "").lower().startswith(str(value).lower()):
+                return False
         elif op in ("in_last", "in_calendar_day", "between"):
             continue          # dates are the server's business, not the fake's
     return True
