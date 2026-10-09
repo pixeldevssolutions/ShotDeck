@@ -12,8 +12,9 @@ This answers it without picking a project first:
 - the Notes column counts the task's ShotGrid notes and dates the newest
   (sortable); clicking it opens the task's notes as a chat.
 
-The Mine / Everyone switch shows every artist's open tasks on every active
-show instead, with an Artist column. Production starts on Everyone.
+The Mine / To Review / Everyone switch shows instead the tasks that name you
+in config.TASK_LEAD_FIELD, or every artist's on every active show -- both
+with an Artist column and filter. Production starts on Everyone.
 
 "Open" means any status not in config.TASK_DONE_STATUSES. That filter runs on
 the server, so finished work never crosses the wire. The filters on this page
@@ -31,6 +32,7 @@ from PySide6.QtWidgets import (
 )
 
 import config
+from sg_client import EVERYONE, MINE, REVIEW
 from . import theme, ui_state
 from .branding import LoadingPage
 from .software_page import TaskMenu
@@ -113,7 +115,7 @@ class HomeTasks(TaskMenu, QWidget):
     task_opened = Signal(object)          # the Task dict
     notes_requested = Signal(object)      # the Task dict, from the Notes cell
     refresh_requested = Signal()
-    scope_changed = Signal(bool)          # True: every artist's tasks
+    scope_changed = Signal(str)           # MINE, REVIEW or EVERYONE
     # The task menu's actions, as on the project page's TasksTable.
     package_launched = Signal(object, str, str)
     folder_requested = Signal(str)
@@ -124,9 +126,9 @@ class HomeTasks(TaskMenu, QWidget):
 
     def __init__(self, production=False):
         super().__init__()
-        # Every artist's open tasks instead of only your own. Anyone can
-        # switch; production starts there.
-        self.everyone = production
+        # Whose open tasks: your own, the ones you lead or review, or every
+        # artist's. Anyone can switch; production starts on everyone's.
+        self.scope = EVERYONE if production else MINE
         self._tasks = []
         self._rows = []
         self._status_labels = {}
@@ -152,16 +154,16 @@ class HomeTasks(TaskMenu, QWidget):
         top.addSpacing(12)
         scope = QButtonGroup(self)
         self.scope_buttons = {}
-        for everyone, text in ((False, "Mine"), (True, "Everyone")):
+        for key, text in ((MINE, "Mine"), (REVIEW, "To Review"),
+                          (EVERYONE, "Everyone")):
             btn = QPushButton(text)
             btn.setObjectName("chip")
             btn.setCheckable(True)
             btn.setCursor(Qt.PointingHandCursor)
-            btn.clicked.connect(
-                lambda _=False, e=everyone: self.set_everyone(e))
+            btn.clicked.connect(lambda _=False, k=key: self.set_scope(k))
             scope.addButton(btn)
             top.addWidget(btn)
-            self.scope_buttons[everyone] = btn
+            self.scope_buttons[key] = btn
         top.addStretch()
         # Everyone only: one artist's tasks, for a manager checking a load.
         self.artist_box = QComboBox()
@@ -255,23 +257,26 @@ class HomeTasks(TaskMenu, QWidget):
         # Connected last, so filling the box never rebuilds a missing table.
         self.project_box.currentIndexChanged.connect(self._rebuild)
         self.artist_box.currentIndexChanged.connect(self._rebuild)
-        self.set_everyone(self.everyone, reload=False)
+        self.set_scope(self.scope, reload=False)
 
     # -- scope ----------------------------------------------------------------
 
-    def set_everyone(self, everyone, reload=True):
-        """Mine or Everyone. The owner of the window reloads on scope_changed."""
-        changed = everyone != self.everyone
-        self.everyone = everyone
-        self.heading.setText("All Open Tasks" if everyone
-                             else "My Open Tasks")
-        self.scope_buttons[everyone].setChecked(True)
+    HEADINGS = {MINE: "My Open Tasks", REVIEW: "Tasks To Review",
+                EVERYONE: "All Open Tasks"}
+
+    def set_scope(self, scope, reload=True):
+        """Mine, To Review or Everyone. The window reloads on scope_changed."""
+        changed = scope != self.scope
+        self.scope = scope
+        self.heading.setText(self.HEADINGS[scope])
+        self.scope_buttons[scope].setChecked(True)
         # Whose task it is only matters when it is not always your own.
-        self.table.setColumnHidden(self.COL_ARTIST, not everyone)
-        self.artist_box.setVisible(everyone)
+        theirs = scope != MINE
+        self.table.setColumnHidden(self.COL_ARTIST, not theirs)
+        self.artist_box.setVisible(theirs)
         if changed and reload:
             self._tasks = []
-            self.scope_changed.emit(everyone)
+            self.scope_changed.emit(scope)
 
     # -- chips ----------------------------------------------------------------
 
@@ -461,7 +466,8 @@ class HomeTasks(TaskMenu, QWidget):
     def _rebuild(self):
         in_project = filter_tasks(self._tasks,
                                   project_id=self.project_box.currentData())
-        artist = self.artist_box.currentData() if self.everyone else None
+        artist = self.artist_box.currentData() if self.scope != MINE \
+            else None
         if artist:
             in_project = [t for t in in_project if self._artist(t) == artist]
         self._refresh_chips(in_project)

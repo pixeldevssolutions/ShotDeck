@@ -3,11 +3,17 @@ import threading
 
 import shotgun_api3
 
+import re
+
 import applog
 import config
 import notes_service
 
 log = applog.get()
+
+# Whose tasks a list holds: the artist's own, the ones they lead or review
+# (config.TASK_LEAD_FIELD), or every artist's.
+MINE, REVIEW, EVERYONE = "mine", "review", "everyone"
 
 
 def _newer(candidate, current, field):
@@ -762,9 +768,9 @@ class SGClient:
 
     # -- queries -----------------------------------------------------------
 
-    def my_tasks(self, project, statuses=None, everyone=False):
+    def my_tasks(self, project, statuses=None, scope=MINE):
         return self._my_tasks(project=project, statuses=statuses,
-                              everyone=everyone)
+                              scope=scope)
 
     def all_my_tasks(self, statuses=None):
         """Every task assigned to this artist, across all projects.
@@ -775,21 +781,29 @@ class SGClient:
         """
         return self._my_tasks(project=None, statuses=statuses)
 
-    def open_tasks(self, everyone=False):
+    def open_tasks(self, scope=MINE):
         """Unfinished tasks across all projects, for the home page.
 
-        The artist's own, or with everyone=True (production) every artist's
-        on every active show. Filtered server-side so finished work never
-        crosses the wire.
+        The artist's own, the ones they review (scope=REVIEW), or every
+        artist's on every active show (scope=EVERYONE). Filtered server-side
+        so finished work never crosses the wire.
         """
         return self._my_tasks(exclude_statuses=config.TASK_DONE_STATUSES,
-                              everyone=everyone)
+                              scope=scope)
 
     def _my_tasks(self, project=None, statuses=None, exclude_statuses=None,
-                  everyone=False):
-        if everyone:
+                  scope=MINE):
+        fields = config.TASK_FIELDS
+        if scope == EVERYONE:
             filters = [] if project else \
                 [["project.Project.sg_status", "is", "Active"]]
+        elif scope == REVIEW:
+            if not self._owner_value:
+                return []
+            # Asked for only here: until the site has the field, only this
+            # list fails, not the artist's own.
+            fields = fields + [config.TASK_LEAD_FIELD]
+            filters = [[config.TASK_LEAD_FIELD, "contains", self._owner_value]]
         elif config.TASK_OWNER_IS_ENTITY:
             if not self._owner:
                 return []
@@ -812,7 +826,15 @@ class SGClient:
             filters.append(["sg_status_list", "in", statuses])
         if exclude_statuses:
             filters.append(["sg_status_list", "not_in", list(exclude_statuses)])
-        return self.sg.find(
-            "Task", filters, config.TASK_FIELDS,
+        tasks = self.sg.find(
+            "Task", filters, fields,
             order=[{"field_name": "due_date", "direction": "asc"}],
         )
+        if scope == REVIEW:
+            # "contains" also matches inside a longer name (al@ in sal@);
+            # keep only the tasks that list this exact person.
+            me = self._owner_value.lower()
+            tasks = [t for t in tasks if me in (
+                s.strip().lower() for s in
+                re.split(r"[,;]", t.get(config.TASK_LEAD_FIELD) or ""))]
+        return tasks
