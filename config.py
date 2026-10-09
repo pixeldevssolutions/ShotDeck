@@ -200,7 +200,7 @@ NOTES_MIN_REFRESH_SECONDS = 5
 # Their "To Review" list is the tasks that name them here.
 TASK_LEAD_FIELD = os.environ.get("FLOW_TASK_LEAD_FIELD", "sg_lead_reviewer")
 # Setting a task to this status in Flow asks the artist for a note and mails
-# the task's leads (review_mail.py), through the pipeline's mailer.
+# the task's leads (status_mail.py), through the pipeline's mailer.
 REVIEW_MAIL_STATUS = os.environ.get("FLOW_REVIEW_MAIL_STATUS", "prw")
 PIPELINE_ROOT = os.environ.get("PIPELINE_ROOT",
                                "/software/pipeline/vfx-ingest-pipeline")
@@ -212,6 +212,17 @@ PRODUCTION_USERS = [
     s.strip() for s in os.environ.get("FLOW_PRODUCTION_USERS", "").split(",")
     if s.strip()
 ]
+# Setting a task to one of these in Flow mails production (status_mail.py):
+# the FLOW_PRODUCTION_MAIL addresses, or else the production logins above at
+# the studio's mail domain.
+PRODUCTION_MAIL_STATUSES = [
+    s.strip() for s in os.environ.get(
+        "FLOW_PRODUCTION_MAIL_STATUSES", "cmpt,pkg").split(",") if s.strip()
+]
+PRODUCTION_MAIL = [
+    s.strip() for s in os.environ.get("FLOW_PRODUCTION_MAIL", "").split(",")
+    if s.strip()
+] or [f"{login}@{USER_EMAIL_DOMAIN}" for login in PRODUCTION_USERS]
 
 # -- the review inbox ------------------------------------------------------
 

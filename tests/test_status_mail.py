@@ -1,10 +1,10 @@
-"""Sending a task for review mails its leads, with the artist's note."""
+"""Status changes mail the leads (prw) or production (cmpt, pkg)."""
 
 import os
 
 import config
 import fakes
-import review_mail
+import status_mail
 
 TASK = {"type": "Task", "id": 77, "content": "Comp",
         "project": {"type": "Project", "id": 5, "name": "UAT6"},
@@ -12,17 +12,17 @@ TASK = {"type": "Task", "id": 77, "content": "Comp",
         "step": {"type": "Step", "id": 3, "name": "Comp"}}
 
 
-def _send(leads, note="Edge fixed, please check"):
+def _send(leads, note="Edge fixed, please check", new="prw"):
     sg = fakes.FakeShotgun()
     sg.tasks.append(dict(TASK, **{config.TASK_LEAD_FIELD: leads}))
     sent = []
-    real = review_mail._send_email
-    review_mail._send_email = lambda: lambda *a: sent.append(a)
+    real = status_mail._send_email
+    status_mail._send_email = lambda: lambda *a: sent.append(a)
     try:
-        to = review_mail.send(sg, TASK, "Jitesh", "jitesh@5and8.ai",
-                              note, "ip", "prw")
+        to = status_mail.send(sg, TASK, "Jitesh", "jitesh@5and8.ai",
+                              note, "ip", new)
     finally:
-        review_mail._send_email = real
+        status_mail._send_email = real
     return to, sent
 
 
@@ -39,8 +39,25 @@ def test_the_leads_get_the_task_and_the_note():
 
 def test_no_leads_means_no_mail():
     assert _send("") == ([], [])
-    assert review_mail.recipients("rahul, priya@5and8.ai;") == \
+    assert status_mail.recipients("rahul, priya@5and8.ai;") == \
         ["priya@5and8.ai"], "names without an address are not mailable"
+
+
+def test_complete_and_package_mail_production_not_the_leads():
+    saved = config.PRODUCTION_MAIL
+    config.PRODUCTION_MAIL = ["production@5and8.ai"]
+    try:
+        for code in ("cmpt", "pkg"):
+            assert status_mail.wants_mail(code)
+            to, sent = _send("rahul@5and8.ai", new=code)
+            assert to == ["production@5and8.ai"]
+            assert sent[0][1] == f"[UAT6] AD1030 Comp set to {code} - Jitesh"
+        assert not status_mail.wants_mail("ip")
+        assert _send("rahul@5and8.ai", new="ip") == ([], [])
+        config.PRODUCTION_MAIL = []
+        assert _send("rahul@5and8.ai", new="cmpt") == ([], [])
+    finally:
+        config.PRODUCTION_MAIL = saved
 
 
 def test_a_redirect_sends_everything_to_one_address():

@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
     QMenu, QPushButton, QStackedWidget, QMessageBox, QSplitter, QInputDialog,
 )
 
-import applog, config, launcher, notes_service, paths, review_mail, rv_player
+import applog, config, launcher, notes_service, paths, rv_player, status_mail
 from sg_client import EVERYONE
 from . import jobs
 from .widgets import STYLE, UserChip
@@ -620,8 +620,8 @@ class MainWindow(QMainWindow):
         """Write a status change back to ShotGrid, off the UI thread."""
         task_id = task["id"]
         old = task.get("sg_status_list") or ""
-        for_review = code == config.REVIEW_MAIL_STATUS
-        note = self._ask_review_note(task) if for_review else ""
+        mails = status_mail.wants_mail(code)
+        note = self._ask_status_note(task, code) if mails else ""
         if note is None:
             return                      # cancelled: the status stays as it was
         self.statusBar().showMessage(
@@ -632,8 +632,8 @@ class MainWindow(QMainWindow):
 
         def write():
             self.sg.set_task_status(task_id, code)
-            mailed = self._send_for_review(task, note, old, code) \
-                if for_review else ""
+            mailed = self._mail_status_change(task, note, old, code) \
+                if mails else ""
             return task_id, code, mailed
 
         def done(result):
@@ -654,32 +654,34 @@ class MainWindow(QMainWindow):
 
         self._run(write, done, on_error=failed)
 
-    def _ask_review_note(self, task):
-        """The artist's note for the leads; None if they cancel."""
+    def _ask_status_note(self, task, code):
+        """The artist's note for whoever gets the mail; None if they cancel."""
+        who = "the leads" if code == config.REVIEW_MAIL_STATUS \
+            else "production"
         text, ok = QInputDialog.getMultiLineText(
-            self, "Send for review",
-            f"Note for the leads on '{task.get('content', '')}':")
+            self, f"Set to {code}",
+            f"Note for {who} on '{task.get('content', '')}':")
         return text.strip() if ok else None
 
-    def _send_for_review(self, task, note, old, code):
-        """Post the note on the task and mail the leads. On the worker, after
-        the status is saved: a failure here is reported, never undoes it."""
+    def _mail_status_change(self, task, note, old, code):
+        """Post the note on the task and mail whoever acts next. On the
+        worker, after the status is saved: a failure here is reported, never
+        undoes it."""
         if note:
             try:
                 self.sg.create_note(task["project"], None, note,
-                                    "Ready for review", task)
+                                    f"Set to {code}", task)
             except Exception as e:
-                log.warning("review note on task %s failed: %s",
+                log.warning("status note on task %s failed: %s",
                             task["id"], e)
         try:
-            to = review_mail.send(
+            to = status_mail.send(
                 self.sg.sg, task, notes_service.signer_name(self.login),
                 self.email, note, old, code)
         except Exception as e:
-            log.warning("review mail for task %s failed: %s", task["id"], e)
-            return f"review mail failed: {e}"
-        return (f"mailed {', '.join(to)}" if to
-                else f"nobody in {config.TASK_LEAD_FIELD} to mail")
+            log.warning("%s mail for task %s failed: %s", code, task["id"], e)
+            return f"mail failed: {e}"
+        return f"mailed {', '.join(to)}" if to else "nobody to mail"
 
     def open_folder(self, path):
         try:
