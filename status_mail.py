@@ -1,8 +1,12 @@
-"""Mail a task's leads when the artist sends it for review.
+"""Mail the people who act next when an artist changes a task's status.
 
-When a task is set to config.REVIEW_MAIL_STATUS ("prw") in Flow, everyone
-listed in the task's lead field (sg_lead_reviewer, comma-separated emails)
-gets a mail with the task and the artist's note. The SMTP side is the
+Set in Flow to                        mails
+config.REVIEW_MAIL_STATUS ("prw")     the task's leads: the emails in its
+                                      lead field (sg_lead_reviewer)
+config.PRODUCTION_MAIL_STATUSES       production: config.PRODUCTION_MAIL
+  ("cmpt", "pkg")
+
+The mail carries the task and the artist's note. The SMTP side is the
 pipeline's own services.mailer.send_email, imported from PIPELINE_ROOT the
 way the ingest API does it, so there is one mailer and one set of SMTP_*
 settings for the studio.
@@ -26,26 +30,34 @@ import config
 log = applog.get()
 
 
+def wants_mail(code):
+    return code == config.REVIEW_MAIL_STATUS or \
+        code in config.PRODUCTION_MAIL_STATUSES
+
+
 def recipients(value):
     """The addresses in a lead field: "a@x, b@x" -> ["a@x", "b@x"]."""
     return [a.strip() for a in re.split(r"[,;]", value or "") if "@" in a]
 
 
 def message(task, artist, email, note, old, new):
-    """(subject, html body) for one review request."""
+    """(subject, html body) for one status change."""
     entity = (task.get("entity") or {}).get("name") or ""
     name = task.get("content") or ""
     project = (task.get("project") or {}).get("name") or ""
     step = (task.get("step") or {}).get("name") or ""
-    subject = f"[{project}] {entity} {name} ready for review - {artist}"
+    what = "ready for review" if new == config.REVIEW_MAIL_STATUS \
+        else f"set to {new}"
+    subject = f"[{project}] {entity} {name} {what} - {artist}"
     rows = [("Project", project), ("Shot / Asset", entity), ("Task", name),
             ("Step", step), ("Status", f"{old or '-'} -> {new}"),
             ("Artist", f"{artist} <{email}>" if email else artist)]
     body = (
-        "<p><b>{0}</b> sent <b>{1}</b> for review.</p><table>{2}</table>"
-        "<p><b>Note</b></p><p>{3}</p>"
-        '<p><a href="{4}">Open the task in ShotGrid</a></p>').format(
+        "<p><b>{0}</b>: <b>{1}</b> {2}.</p><table>{3}</table>"
+        "<p><b>Note</b></p><p>{4}</p>"
+        '<p><a href="{5}">Open the task in ShotGrid</a></p>').format(
             html.escape(artist), html.escape(f"{entity} {name}".strip()),
+            html.escape(what),
             "".join(f"<tr><td><b>{html.escape(k)}</b></td>"
                     f"<td>{html.escape(v)}</td></tr>" for k, v in rows if v),
             html.escape(note or "(no note)").replace("\n", "<br>"),
@@ -53,24 +65,34 @@ def message(task, artist, email, note, old, new):
     return subject, body
 
 
+def _to(sg, task, new):
+    if new == config.REVIEW_MAIL_STATUS:
+        row = sg.find_one("Task", [["id", "is", task["id"]]],
+                          [config.TASK_LEAD_FIELD]) or {}
+        return recipients(row.get(config.TASK_LEAD_FIELD)), \
+            config.TASK_LEAD_FIELD
+    if new in config.PRODUCTION_MAIL_STATUSES:
+        return list(config.PRODUCTION_MAIL), "FLOW_PRODUCTION_MAIL"
+    return [], ""
+
+
 def send(sg, task, artist, email, note, old, new):
-    """Mail the task's leads. Returns who it went to; [] if nobody."""
+    """Mail whoever this status is for. Returns who it went to; [] if nobody."""
     if os.environ.get("FLOW_MAIL_OFF") == "1":
         return []
-    row = sg.find_one("Task", [["id", "is", task["id"]]],
-                      [config.TASK_LEAD_FIELD]) or {}
-    to = recipients(row.get(config.TASK_LEAD_FIELD))
+    to, source = _to(sg, task, new)
     if not to:
-        log.info("task %s has no %s; no review mail", task["id"],
-                 config.TASK_LEAD_FIELD)
+        if source:
+            log.info("nobody in %s; no mail for task %s going to %s",
+                     source, task["id"], new)
         return []
     redirect = os.environ.get("FLOW_MAIL_REDIRECT")
     if redirect:
-        log.info("review mail for %s redirected to %s", to, redirect)
+        log.info("mail for %s redirected to %s", to, redirect)
         to = [redirect]
     subject, body = message(task, artist, email, note, old, new)
     _send_email()(to, subject, body)
-    log.info("review mail for task %s sent to %s", task["id"], to)
+    log.info("%s mail for task %s sent to %s", new, task["id"], to)
     return to
 
 
