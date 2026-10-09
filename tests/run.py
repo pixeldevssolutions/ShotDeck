@@ -50,6 +50,7 @@ MODULES = [
     "test_dcc",
     "test_usd",
     "test_launch_env",
+    "test_rv_review",
     "test_ui",
 ]
 

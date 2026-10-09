@@ -22,12 +22,14 @@ bundled libraries on LD_LIBRARY_PATH. RV notices one of them itself --
 """
 
 import glob
+import json
 import os
 import shutil
 import subprocess
 
 import applog
 import config
+import context
 import rez_scan
 from env_resolver import build_env
 from launcher import LaunchError, outlive_flow, _quote
@@ -60,6 +62,10 @@ MODES = {
     "wipe": ["-wipe"],
     "difference": ["-diff"],
 }
+
+# Who is reviewing, for the notes RV sends: {"login": ..., "user": HumanUser}.
+# Set by MainWindow, like SGClient.login.
+reviewer = {}
 
 # A frames path is a pattern (file.%04d.exr, file.####.exr, file.@@@@.exr),
 # so os.path.isfile is always False for it. RV expands it itself.
@@ -159,15 +165,53 @@ def _version_from_path(path):
     return ""
 
 
-def command(paths, mode=""):
-    """The full argv for reviewing these paths, compare flag included."""
+def command(paths, mode="", notes=False):
+    """The full argv for reviewing these paths, compare flag included.
+
+    notes=True loads Flow's "Send Note to ShotGrid" menu
+    (rez/flow_dcc/startup/rv/flow_review.py) into RV.
+    """
     if not paths:
         raise LaunchError("No media to open in RV.")
     prefix, _ = executable()
     flags = MODES.get(mode, [])
     if flags and len(paths) < 2:
         flags = []           # -wipe with one source is just a slower open
-    return prefix + list(config.RV_ARGS) + flags + list(paths)
+    return prefix + list(config.RV_ARGS) + flags + \
+        (_notes_flags() if notes else []) + list(paths)
+
+
+def _notes_flags():
+    """-pyeval that loads flow_review from the in-DCC tools, or nothing.
+
+    Appended, never prepended, to RV's sys.path, so nothing of Flow's can
+    shadow RV's own modules. flow_dcc is on it too: flow_review uses its
+    shotgun_api3 lookup.
+    """
+    startup = os.path.join(config.DCC_SOURCE_ROOT, "startup", "rv")
+    if not os.path.isfile(os.path.join(startup, "flow_review.py")):
+        log.warning("no %s -- RV opens without the Send Note menu", startup)
+        return []
+    return ["-pyeval",
+            f"import sys; sys.path.append({config.DCC_SOURCE_ROOT!r}); "
+            f"sys.path.append({startup!r}); "
+            "import flow_review; flow_review.install()"]
+
+
+def review_env(versions, paths, project):
+    """What flow_review needs to know: which Version each path is, and who."""
+    return {
+        "FLOW_RV_REVIEW": json.dumps({
+            "site": config.SG_SITE,
+            "project": {"type": "Project", "id": project["id"]},
+            "login": reviewer.get("login") or "",
+            "user": reviewer.get("user"),
+            "versions": [{"path": p, "id": v["id"], "code": v.get("code"),
+                          "entity": v.get("entity"), "task": v.get("sg_task")}
+                         for v, p in zip(versions, paths)],
+        }, default=str),
+        "FLOW_SG_API_PATH": context._sg_api_path(),
+    }
 
 
 def environment(project=None, software_code=None):
@@ -192,11 +236,12 @@ def open_versions(versions, mode="", project=None):
     Raises LaunchError when that leaves nothing.
     """
     versions = [v for v in versions if v]
-    paths, missing = [], []
+    paths, found, missing = [], [], []
     for version in versions:
         path = media_path(version)
         if path:
             paths.append(path)
+            found.append(version)
         else:
             missing.append(version.get("code") or f"Version {version['id']}")
 
@@ -209,13 +254,19 @@ def open_versions(versions, mode="", project=None):
         log.warning("no media for %s — opening RV without them",
                     ", ".join(missing))
 
-    return open_paths(paths, mode=mode, project=project)
+    notes = review_env(found, paths, project) if project else None
+    return open_paths(paths, mode=mode, project=project, notes=notes)
 
 
-def open_paths(paths, mode="", project=None):
-    """Same, for paths that did not come from a Version. Returns (pid, log_path)."""
-    cmd = command(paths, mode)
+def open_paths(paths, mode="", project=None, notes=None):
+    """Same, for paths that did not come from a Version. Returns (pid, log_path).
+
+    notes: review_env() for paths that are Versions, which adds the Send Note
+    menu.
+    """
+    cmd = command(paths, mode, notes=bool(notes))
     env = environment(project)
+    env.update(notes or {})
     log_path = applog.launch_log_path("rv")
 
     log.info("opening %d source(s) in RV%s",
