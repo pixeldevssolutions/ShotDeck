@@ -193,6 +193,18 @@ USER_FIELDS = ["name", "email", "permission_rule_set", "image"]
 # two refreshes that actually hits ShotGrid.
 NOTES_MIN_REFRESH_SECONDS = 5
 
+# -- production view -------------------------------------------------------
+#
+# Production managers see every open task on every active show, with who it
+# is assigned to, instead of only their own. Membership is the AD group below
+# (as the OS resolves it, like ai-users) or a login listed in
+# FLOW_PRODUCTION_USERS=rahul,priya.
+PRODUCTION_GROUP = os.environ.get("FLOW_PRODUCTION_GROUP", "production")
+PRODUCTION_USERS = [
+    s.strip() for s in os.environ.get("FLOW_PRODUCTION_USERS", "").split(",")
+    if s.strip()
+]
+
 # -- the review inbox ------------------------------------------------------
 
 # How far back "needs attention" looks. Everything older has been dealt with

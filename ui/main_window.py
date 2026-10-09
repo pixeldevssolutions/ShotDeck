@@ -7,7 +7,8 @@ from PySide6.QtWidgets import (
     QMenu, QPushButton, QStackedWidget, QMessageBox, QSplitter,
 )
 
-import applog, config, launcher, paths, rv_player
+import applog, config, launcher, notes_service, paths, rv_player
+from auth import group_check
 from . import jobs
 from .widgets import STYLE, UserChip
 from .console import ConsolePanel
@@ -17,6 +18,7 @@ from .package_dialog import PackageDialog
 from .publish_dialog import PublishDialog
 from .review_page import ReviewPage
 from .software_page import SoftwarePage
+from .task_notes import TaskNotesDialog
 from .task_search import TaskSearch
 from .version_browser import VersionBrowser
 from .version_compare import VersionCompare
@@ -24,8 +26,15 @@ from .version_compare import VersionCompare
 log = applog.get()
 
 
+def is_production(login):
+    """Production sees every artist's tasks, not only their own."""
+    if login in config.PRODUCTION_USERS:
+        return True
+    return group_check.in_group_local(login, config.PRODUCTION_GROUP) is True
+
+
 class MainWindow(QMainWindow):
-    def __init__(self, sg, login=None, auth_result=None):
+    def __init__(self, sg, login=None, auth_result=None, production=None):
         super().__init__()
         self.sg = sg
         # login comes from auth.authenticate() in main(); the getpass fallback
@@ -36,6 +45,8 @@ class MainWindow(QMainWindow):
         self.email = config.current_user_email(self.login)
         self.display_name = (auth_result.display_name if auth_result
                              else None) or self.login
+        self.production = is_production(self.login) if production is None             else production
+        self.sg.login = self.login      # signs the notes this session writes
         self.owner = None         # ShotGrid HumanUser, filled by _bootstrap
         self._projects = []       # full Project dicts, for the header search
         self._pending_task_id = None    # task to select once its project loads
@@ -133,7 +144,7 @@ class MainWindow(QMainWindow):
         self.stack = QStackedWidget()
         # Home: the artist's open tasks from every project above the project
         # tiles, so the day's work is visible without choosing a show first.
-        self.home_tasks = HomeTasks()
+        self.home_tasks = HomeTasks(production=self.production)
         self.project_page = ProjectPage()
         self.home = QWidget()
         home_lay = QVBoxLayout(self.home)
@@ -167,6 +178,7 @@ class MainWindow(QMainWindow):
 
         self.project_page.project_selected.connect(self.open_project)
         self.home_tasks.task_opened.connect(self.goto_task)
+        self.home_tasks.notes_requested.connect(self.open_task_notes)
         self.home_tasks.refresh_requested.connect(self._load_open_tasks)
         self.home_tasks.package_launched.connect(self.launch_package)
         self.home_tasks.folder_requested.connect(self.open_folder)
@@ -213,6 +225,8 @@ class MainWindow(QMainWindow):
         rows = [("Name", self.display_name),
                 ("Login", self.login),
                 ("Email", self.email)]
+        if self.production:
+            rows.append(("View", "Production — every artist's tasks"))
         if self.auth is not None:
             rows.append(("Signed in with",
                          self.AUTH_METHOD_LABELS.get(self.auth.method,
@@ -387,20 +401,39 @@ class MainWindow(QMainWindow):
     def _load_open_tasks(self):
         """The home page's task list: every unfinished task, all projects."""
         self.home_tasks.set_loading()
-        self._run(self.sg.open_tasks, self._on_open_tasks,
+        self._run(lambda: self.sg.open_tasks(everyone=self.production),
+                  self._on_open_tasks,
                   on_error=lambda m: (
                       log.warning("could not load open tasks: %s", m),
                       self.home_tasks.set_tasks([])))
 
     def _on_open_tasks(self, tasks):
         self.home_tasks.set_tasks(tasks)
-        if tasks:
+        self._load_task_notes()
+        # ponytail: production skips Latest Version -- every version on every
+        # show is too big a query; page it per project if they ask for it.
+        if tasks and not self.production:
             # For the menu's Latest Version entry: one query for the lot.
             self._run(self.sg.latest_versions_for_tasks,
                       self.home_tasks.set_latest_versions,
                       [t["id"] for t in tasks],
                       on_error=lambda m: log.warning(
                           "could not read latest versions: %s", m))
+
+    def _load_task_notes(self):
+        """The Notes column: count and newest date, one pass for the list."""
+        ids = [t["id"] for t in self.home_tasks._tasks]
+        if not ids:
+            return
+        self._run(notes_service.NotesService(self.sg).task_summary,
+                  self.home_tasks.set_notes, ids,
+                  on_error=lambda m: log.warning(
+                      "could not read task notes: %s", m))
+
+    def open_task_notes(self, task):
+        dialog = TaskNotesDialog(self.sg, self._task_project(task), task, self)
+        dialog.posted.connect(self._load_task_notes)
+        dialog.exec()
 
     # -- searching every project's tasks -------------------------------------
 
@@ -475,7 +508,8 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Loading apps and tasks...")
 
         self._run(self.sg.software_for_project, self._on_software, project)
-        self._run(self.sg.my_tasks, self._on_tasks, project)
+        self._run(lambda p: self.sg.my_tasks(p, everyone=self.production),
+                  self._on_tasks, project)
 
     def _on_software(self, softwares):
         self.software_page.set_software(softwares)
