@@ -10,7 +10,8 @@ No Qt: the browser renders threads, it does not build them.
 
 Every write goes through the one ShotGrid script user, so the author is not
 something ShotGrid can tell apart. Flow signs each note's text with the AD
-login instead -- "[jitesh] Fixed the edge" -- and reads that back as the author.
+login instead -- "Jitesh: Fixed the edge" -- and reads that back as the author.
+Notes signed the earlier way, "[jitesh] Fixed the edge", still read back.
 """
 
 import re
@@ -20,16 +21,28 @@ import config
 
 log = applog.get()
 
-# "[login] " at the very start of a note. The first tag wins, so a note typed
-# as "[WIP] ..." is stored "[jitesh] [WIP] ..." and still reads as jitesh's.
-_SIGNATURE = re.compile(r"^\[([^\]\n]{1,64})\]\s*")
+# "Login: " at the very start of a note -- one word, no spaces -- or the
+# earlier "[login] ". The first one wins, so a note typed as "WIP: ..." is
+# stored "Jitesh: WIP: ..." and still reads as Jitesh's.
+# ponytail: a note typed on the ShotGrid site as "WIP: ..." reads as written
+# by "WIP"; sign on the site too, or match against known logins, if that bites.
+# The colon must be followed by a space, so "https://..." is not a signature.
+_SIGNATURE = re.compile(
+    r"^(?:\[([^\]\n]{1,64})\]|([A-Za-z][\w.\-]{0,63}):(?=\s|$))\s*")
+
+
+def signer_name(login):
+    """jitesh -> Jitesh: how a login is written in front of a note."""
+    return login[:1].upper() + login[1:] if login else ""
 
 
 def sign(content, login):
-    """content with "[login] " in front, unless it is already signed by login."""
-    if not login or content.startswith(f"[{login}]"):
+    """content with "Login: " in front, unless it is already signed by login."""
+    if not login:
         return content
-    return f"[{login}] {content}"
+    if signature(content)[0].lower() == login.lower():
+        return content
+    return f"{signer_name(login)}: {content}"
 
 
 def signature(content):
@@ -37,7 +50,7 @@ def signature(content):
     match = _SIGNATURE.match(content or "")
     if not match:
         return "", content
-    return match.group(1).strip(), content[match.end():]
+    return (match.group(1) or match.group(2)).strip(), content[match.end():]
 
 
 class Message:
@@ -212,7 +225,8 @@ class NotesService:
         everyone can resolve to the same ShotGrid user.
         """
         if message.signed_by:
-            return message.signed_by == getattr(self.sg, "login", None)
+            return message.signed_by.lower() == \
+                (getattr(self.sg, "login", None) or "").lower()
         owner = getattr(self.sg, "owner", None)
         return message.written_by(owner)
 

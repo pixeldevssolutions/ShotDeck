@@ -9,7 +9,7 @@ adds is
 
 which takes the frame on screen, annotations and all, asks for the note text,
 and creates a Note on the source's Version -- linked to its shot and task,
-signed "[login] ..." like every note Flow writes -- with the frame attached.
+signed "Jitesh: ..." like every note Flow writes -- with the frame attached.
 
 What RV does not know, rv_player tells it in FLOW_RV_REVIEW (JSON): which
 Version each source path is, who is reviewing, and the site. Only install()
@@ -57,10 +57,13 @@ def version_for(media, versions):
 
 
 def sign(content, login):
-    """Same as notes_service.sign in the app: "[login] " in front, once."""
-    if not login or content.startswith("[%s]" % login):
+    """Same as notes_service.sign in the app: "Jitesh: " in front, once."""
+    if not login:
         return content
-    return "[%s] %s" % (login, content)
+    name = login[:1].upper() + login[1:]
+    if content.lower().startswith(name.lower() + ":"):
+        return content
+    return "%s: %s" % (name, content)
 
 
 def note_data(review, version, text, frame):
@@ -78,9 +81,7 @@ def note_data(review, version, text, frame):
     task = version.get("task")
     if task:
         data["tasks"] = [{"type": "Task", "id": task["id"]}]
-    user = review.get("user")
-    if user:
-        data["user"] = {"type": user["type"], "id": user["id"]}
+    # No "user": the Note is the script's, the lead is the signature.
     return data
 
 

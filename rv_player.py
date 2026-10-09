@@ -205,7 +205,6 @@ def review_env(versions, paths, project):
             "site": config.SG_SITE,
             "project": {"type": "Project", "id": project["id"]},
             "login": reviewer.get("login") or "",
-            "user": reviewer.get("user"),
             "versions": [{"path": p, "id": v["id"], "code": v.get("code"),
                           "entity": v.get("entity"), "task": v.get("sg_task")}
                          for v, p in zip(versions, paths)],

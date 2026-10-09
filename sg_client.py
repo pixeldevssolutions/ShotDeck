@@ -460,7 +460,9 @@ class SGClient:
         data = {
             "project": {"type": "Project", "id": project["id"]},
             "code": name,
-            "description": description or "",
+            # Signed like a note, "Jitesh: Added for first pass".
+            "description": notes_service.sign(description, self.login)
+            if description else "",
             config.VERSION_TASK_FIELD: {"type": "Task", "id": task["id"]},
         }
         if entity:
@@ -531,9 +533,18 @@ class SGClient:
         return rows
 
     def notes_by_user(self, user, project=None, days=30):
-        """Notes this artist wrote recently -- the ones replies can arrive on."""
+        """Notes this artist wrote recently -- the ones replies can arrive on.
+
+        Flow writes notes as the script user, so the artist's are the ones
+        signed with their login; older ones carry them in the user field.
+        """
+        mine = [["user", "is", {"type": user["type"], "id": user["id"]}]]
+        if self.login:
+            mine += [["content", "starts_with",
+                      notes_service.signer_name(self.login) + ":"],
+                     ["content", "starts_with", f"[{self.login}]"]]
         filters = [
-            ["user", "is", {"type": user["type"], "id": user["id"]}],
+            {"filter_operator": "any", "filters": mine},
             ["created_at", "in_last", [days, "DAY"]],
         ]
         if project:
@@ -569,8 +580,11 @@ class SGClient:
         )
 
     def create_note(self, project, version, content, subject="", task=None):
-        """A note on a Version (or, with version=None, on the task alone),
-        credited to the artist, not to the script."""
+        """A note on a Version (or, with version=None, on the task alone).
+
+        Written as the script user (SG_daemon): the artist is the signature
+        in the text, "Jitesh: ...", not the Note's user field.
+        """
         data = {
             "project": {"type": "Project", "id": project["id"]},
             "subject": subject or "",
@@ -584,9 +598,6 @@ class SGClient:
                                        "id": entity["id"]})
         if task and task.get("id"):
             data["tasks"] = [{"type": "Task", "id": task["id"]}]
-        if self._owner:
-            data["user"] = {"type": self._owner["type"],
-                            "id": self._owner["id"]}
         log.info("adding a note to %s", f"Version {version['id']}" if version
                  else f"Task {(task or {}).get('id')}")
         return self.sg.create("Note", data)
@@ -596,9 +607,6 @@ class SGClient:
             "entity": {"type": "Note", "id": note_id},
             "content": notes_service.sign(content, self.login),
         }
-        if self._owner:
-            data["user"] = {"type": self._owner["type"],
-                            "id": self._owner["id"]}
         log.info("replying to Note %s", note_id)
         return self.sg.create("Reply", data)
 
